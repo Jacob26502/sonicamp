@@ -5,6 +5,11 @@
     <!-- Only used to say "sync stopped: sign in again" when the server rejects the login. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Android 11+ package visibility: needed to send scan requests to Poweramp. -->
+    <queries>
+        <package android:name="com.maxmpz.audioplayer" />
+    </queries>
+
     <!--
       allowBackup=false: the saved password/API key is encrypted with an Android Keystore key,
       which is never backed up, so restored ciphertext could not be decrypted anyway.
@@ -29,5 +34,34 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          The library as a Storage Access Framework provider. MANAGE_DOCUMENTS means only the system
+          (and apps the user grants a folder to, like Poweramp via its Music Folders picker) can read it.
+        -->
+        <provider
+            android:name=".provider.SubsonicDocumentsProvider"
+            android:authorities="dev.subsonic.poweramp.provider"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:icon="@mipmap/ic_launcher"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <!-- Tells Poweramp this provider implements its track provider API. -->
+            <meta-data
+                android:name="com.maxmpz.PowerampTrackProvider"
+                android:value="true" />
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
+        <!-- Poweramp sends this explicitly when playback starts/stops; used to retry a pending rescan. -->
+        <receiver
+            android:name=".poweramp.PowerampStatusReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.maxmpz.audioplayer.STATUS_CHANGED_EXPLICIT" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

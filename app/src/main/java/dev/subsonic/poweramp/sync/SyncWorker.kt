@@ -37,6 +37,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             Log.i(TAG, "Sync done: ${result.summary()}")
             app.syncStatus.markSuccess(System.currentTimeMillis(), result.summary())
             SyncNotifications.cancelAuthFailed(applicationContext)
+            if (result.changed) app.notifyProviderRootsChanged()
+            app.powerampRescans.onSyncFinished(result.changed)
             Result.success()
         } catch (e: CancellationException) {
             app.syncStatus.markError("Sync was interrupted. Will retry.", authFailed = false)

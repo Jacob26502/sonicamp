@@ -130,9 +130,14 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 app.credentialStore.clear()
                 app.libraryDatabase.wipe()
+                app.coverCache.clear()
             }
             app.syncStatus.clear()
             SyncNotifications.cancelAuthFailed(app)
+            // Let Poweramp drop the tracks; we're in the foreground, so the request is honoured.
+            app.notifyProviderRootsChanged()
+            app.powerampRescans.reset()
+            app.powerampRescans.request()
             _state.value = LoginUiState()
         }
     }

@@ -9,9 +9,23 @@ An Android app that makes a Subsonic / OpenSubsonic server (developed against **
 |---|---|---|
 | 1 | Subsonic client, login screen, encrypted credentials | done |
 | 2 | Local library database, scheduled sync | done |
-| 3 | Poweramp track provider (browse + stream) | next |
-| 4 | Lyrics, playlists in Poweramp, scrobbling | planned |
-| 5 | Offline cache, transcoding with seeking | planned |
+| 3 | Poweramp track provider (browse + stream) | done, see known limitations |
+| 4 | Lyrics, playlists in Poweramp, scrobbling | next |
+| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | planned |
+
+### Known limitations (phase 3)
+
+Tracks are handed to Poweramp as "dynamic URL" tracks: Poweramp asks for a fresh stream URL at
+playback time. Tested on Poweramp build 1035, this means:
+
+- **Info/Tags shows the track as a "Stream"** with empty Title/Genre/Artist fields. Poweramp does not
+  ask the provider for tags there for URL tracks. The player, lists and library categories do show
+  our tags.
+- **Info/Tags displays the full stream URL, including the login token** (`u`, `t`, `s`). The token
+  stays valid until the Navidrome password changes.
+
+Phase 5 fixes both by streaming the audio through the app (a proxy file descriptor with HTTP range
+requests), so Poweramp treats tracks as files and never sees a URL.
 
 ## How it works
 
@@ -26,6 +40,14 @@ An Android app that makes a Subsonic / OpenSubsonic server (developed against **
 - **Schedule:** WorkManager runs the sync every 6, 12 or 24 hours (optionally Wi-Fi only), plus right
   after login and on "Sync now". If the server rejects the login, scheduled syncs pause and a
   notification asks you to sign in again.
+- **Poweramp provider:** a Storage Access Framework documents provider showing
+  Library → Album artist → Album → Tracks, answered from the local database. Tracks carry full tags;
+  multi-disc albums are numbered disc × 1000 + track so discs sort in order. Covers are fetched once
+  per album and cached. To add it: Poweramp → Settings → Library → Music Folders → + → Subsonic.
+- **Keeping Poweramp current:** after a sync that changed something the app asks Poweramp to rescan.
+  If Poweramp ignores that (it only accepts scan requests while it or the app is in the foreground),
+  the request is retried when Poweramp starts playing. Rescan in Poweramp also triggers a server sync
+  if the last one is over 10 minutes old.
 
 ## Project layout
 
@@ -34,8 +56,12 @@ app/src/main/java/dev/subsonic/poweramp/
   subsonic/   Subsonic API client (no Android dependencies; unit-tested on the JVM)
   sync/       Sync logic (pure Kotlin) plus WorkManager worker, status and settings
   library/    SQLite library database (albums and artists are views over tracks)
+  provider/   Poweramp track provider (DocumentsProvider), document ids, cover cache
+  poweramp/   Poweramp API constants and rescan requests
   settings/   Saved server and encrypted credential storage
   ui/         Compose screens
+app/src/main/java/com/maxmpz/poweramp/player/TrackProviderConsts.java
+              copied from github.com/maxmpz/powerampapi (licence permits use by Poweramp plugins)
 Navidrome/    Docker compose for a local test server, plus a rescan script
 ```
 
@@ -85,5 +111,16 @@ Debug builds log every HTTP request under the `SubsonicHttp` tag with credential
 (`u=***&t=***&s=***`):
 
 ```bash
-adb logcat -s SubsonicHttp SyncWorker
+adb logcat -s SubsonicHttp SyncWorker SubsonicProvider PowerampRescans
 ```
+
+`SubsonicProvider` logs each distinct set of columns Poweramp requests, scan starts, playback-URL
+requests (track id only) and cover fetches.
+
+### Testing on a phone over USB
+
+`adb reverse tcp:4533 tcp:4533` lets a USB-connected phone reach the dev server at
+`http://127.0.0.1:4533`. Install with `adb -s <serial> install --user 0 -r app/build/outputs/apk/debug/app-debug.apk`
+rather than `gradlew installDebug`, which installs into every user profile on the device (including a
+work profile). Likewise, set `ANDROID_SERIAL` before `connectedDebugAndroidTest`, which otherwise runs
+on every connected device.

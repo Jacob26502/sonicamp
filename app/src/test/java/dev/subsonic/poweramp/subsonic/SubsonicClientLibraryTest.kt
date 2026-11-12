@@ -94,6 +94,9 @@ class SubsonicClientLibraryTest {
         }
         val elapsedMs = (System.nanoTime() - start) / 1_000_000
         assertTrue("took $elapsedMs ms; the request was not cancelled", elapsedMs < 3_000)
+        // The cancelled call is torn down on OkHttp's own thread; give it a moment.
+        val deadline = System.currentTimeMillis() + 2_000
+        while (http.dispatcher.runningCallsCount() > 0 && System.currentTimeMillis() < deadline) Thread.sleep(20)
         assertEquals(0, http.dispatcher.runningCallsCount())
     }
 }

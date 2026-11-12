@@ -36,6 +36,7 @@ fun LibrarySection(
     onSyncNow: () -> Unit,
     onIntervalChange: (Int) -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
+    onAskPowerampRescan: () -> Unit,
     onForget: () -> Unit,
 ) {
     var confirmForget by remember { mutableStateOf(false) }
@@ -103,6 +104,20 @@ fun LibrarySection(
         Spacer(Modifier.size(8.dp))
         Switch(checked = state.settings.wifiOnly, onCheckedChange = onWifiOnlyChange)
     }
+
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    Text("Poweramp", style = MaterialTheme.typography.headlineSmall)
+    Text(
+        "To add this library in Poweramp: Settings → Library → Music Folders → + → open the menu → " +
+            "Subsonic for Poweramp → Subsonic → Use this folder.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    Text(
+        if (state.powerampRescanPending) "The library changed since Poweramp last scanned it."
+        else "Poweramp has scanned the latest library.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Button(onClick = onAskPowerampRescan) { Text("Ask Poweramp to rescan") }
 
     TextButton(onClick = { confirmForget = true }) {
         Text("Forget server", color = MaterialTheme.colorScheme.error)
