@@ -14,7 +14,16 @@ class DocIdTest {
             DocId.Artist(2, "0EeSCUY4dCkAePb7Qt0vLM"),
             DocId.Album("2fFEJcqvGdYqEDcuaLvG3r"),
             DocId.Track("3CuAPq2EiA2QCpSDAA1zXo"),
+            DocId.Playlists,
+            DocId.Playlist("2hLrSCt5r3KbQXhAOUlwmK"),
         ).forEach { assertEquals(it, DocId.parse(it.encoded)) }
+    }
+
+    @Test
+    fun `playlist ids end in m3u8`() {
+        assertEquals("playlist:p1.m3u8", DocId.Playlist("p1").encoded)
+        assertNull(DocId.parse("playlist:p1"))
+        assertNull(DocId.parse("playlist:.m3u8"))
     }
 
     @Test
@@ -47,9 +56,12 @@ class DocIdTest {
     }
 
     @Test
-    fun `display name comes from the server path, else is built`() {
-        assertEquals("01-32 - Blaze.flac", SubsonicDocumentsProvider.displayName(row(32, 1, 1, path = "Artist/Album/01-32 - Blaze.flac")))
-        assertEquals("05 - AC∕DC Song.mp3", SubsonicDocumentsProvider.displayName(row(5, null, 1, title = "AC/DC Song", suffix = "mp3")))
+    fun `display name is built from the tags, the server path is the fallback`() {
+        // Navidrome's made-up path carries a disc prefix; the tags don't.
+        assertEquals("32. Blaze.flac", SubsonicDocumentsProvider.displayName(row(32, 1, 2, path = "Artist/Album/01-32 - Blaze.flac", title = "Blaze")))
+        assertEquals("05. AC∕DC Song.mp3", SubsonicDocumentsProvider.displayName(row(5, null, 1, title = "AC/DC Song", suffix = "mp3")))
         assertEquals("Song", SubsonicDocumentsProvider.displayName(row(null, null, 1, suffix = null)))
+        assertEquals("01-32 - Blaze.flac", SubsonicDocumentsProvider.displayName(row(32, 1, 1, path = "Artist/Album/01-32 - Blaze.flac", title = " ")))
+        assertEquals("Unknown", SubsonicDocumentsProvider.displayName(row(null, null, 1, title = "", suffix = null)))
     }
 }

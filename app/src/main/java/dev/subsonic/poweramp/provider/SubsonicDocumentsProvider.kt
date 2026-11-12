@@ -19,7 +19,18 @@ import com.maxmpz.poweramp.player.TrackProviderConsts
 import dev.subsonic.poweramp.R
 import dev.subsonic.poweramp.SubsonicApp
 import dev.subsonic.poweramp.library.AlbumFolder
+import dev.subsonic.poweramp.library.FolderKind
+import dev.subsonic.poweramp.library.PlaylistRow
 import dev.subsonic.poweramp.library.TrackRow
+import dev.subsonic.poweramp.library.playlistRow
+import dev.subsonic.poweramp.library.playlistRows
+import dev.subsonic.poweramp.library.playlistTracks
+import dev.subsonic.poweramp.lyrics.TrackLyrics
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
+import java.security.MessageDigest
 import dev.subsonic.poweramp.library.albumFolder
 import dev.subsonic.poweramp.library.albumFolders
 import dev.subsonic.poweramp.library.albumFoldersWithoutArtist
@@ -89,7 +100,14 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
                     addFolder(c, doc, artist.name, artist.lastModified, TrackProviderConsts.FLAG_HAS_SUBDIRS, thumbnail = false)
                 }
                 is DocId.Album -> addAlbum(c, db.albumFolder(doc.albumId) ?: notFound(documentId))
-                is DocId.Track -> addTrack(c, db.track(doc.trackId) ?: notFound(documentId), position = null)
+                is DocId.Track -> {
+                    val track = db.track(doc.trackId) ?: notFound(documentId)
+                    // Poweramp's Lyrics view asks for one track with the lyrics columns; only then fetch.
+                    val lyrics = if (wantsLyrics(projection)) lyricsFor(track) else null
+                    addTrack(c, track, position = null, lyrics = lyrics)
+                }
+                DocId.Playlists -> if (playlistsParent() != null) addPlaylistsFolder(c) else notFound(documentId)
+                is DocId.Playlist -> addPlaylist(c, db.playlistRow(doc.playlistId) ?: notFound(documentId))
                 null -> notFound(documentId)
             }
             c
@@ -102,6 +120,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         return guard(c) {
             when (val doc = DocId.parse(parentDocumentId)) {
                 is DocId.Library -> {
+                    if (playlistsParent() == doc) addPlaylistsFolder(c)
                     db.artistFolders(doc.libraryId).forEach {
                         addFolder(c, DocId.Artist(it.libraryId, it.id), it.name, it.lastModified, TrackProviderConsts.FLAG_HAS_SUBDIRS, thumbnail = false)
                     }
@@ -110,7 +129,8 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
                 }
                 is DocId.Artist -> db.albumFolders(doc.libraryId, doc.artistId).forEach { addAlbum(c, it) }
                 is DocId.Album -> db.tracksOfAlbum(doc.albumId).forEachIndexed { i, t -> addTrack(c, t, position = i + 1) }
-                is DocId.Track, null -> notFound(parentDocumentId)
+                DocId.Playlists -> db.playlistRows().forEach { addPlaylist(c, it) }
+                is DocId.Track, is DocId.Playlist, null -> notFound(parentDocumentId)
             }
             c
         }
@@ -128,6 +148,20 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
     // ---- data ----
 
     override fun openDocument(documentId: String, mode: String, signal: CancellationSignal?): ParcelFileDescriptor {
+        if (mode != "r") throw FileNotFoundException("$documentId is read-only")
+        val doc = DocId.parse(documentId)
+        if (doc is DocId.Playlist) {
+            try {
+                val file = writePlaylistFile(doc.playlistId) ?: notFound(documentId)
+                Log.i(TAG, "Playlist $documentId opened (${file.length()} bytes)")
+                return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            } catch (e: FileNotFoundException) {
+                throw e
+            } catch (t: Throwable) {
+                Log.e(TAG, "openDocument $documentId", t)
+                throw FileNotFoundException(t.message)
+            }
+        }
         // Poweramp plays our tracks from their URL and never calls this. Byte-level access for other
         // apps (and offline caching) comes with phase 5.
         throw FileNotFoundException("$documentId is streamed by URL; play it in Poweramp")
@@ -202,7 +236,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             add(Document.COLUMN_DOCUMENT_ID, doc.encoded)
             add(Document.COLUMN_MIME_TYPE, Document.MIME_TYPE_DIR)
             add(Document.COLUMN_DISPLAY_NAME, cleanName(name))
-            add(Document.COLUMN_LAST_MODIFIED, lastModified)
+            add(Document.COLUMN_LAST_MODIFIED, shown(lastModified))
             add(Document.COLUMN_FLAGS, if (thumbnail) Document.FLAG_SUPPORTS_THUMBNAIL else 0)
             // Lets Poweramp's folder picker skip probing for sub-folders.
             add(TrackProviderConsts.COLUMN_FLAGS, subdirs)
@@ -214,13 +248,29 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         TrackProviderConsts.FLAG_NO_SUBDIRS, thumbnail = album.coverArt != null,
     )
 
-    /** @param position 1-based order within its folder, for Poweramp's "By Track #" folder sorting. */
-    private fun addTrack(c: MatrixCursor, t: TrackRow, position: Int?) {
+    private fun addPlaylistsFolder(c: MatrixCursor) =
+        addFolder(c, DocId.Playlists, PLAYLISTS_FOLDER_NAME, playlistsLastModified(), TrackProviderConsts.FLAG_NO_SUBDIRS, thumbnail = false)
+
+    private fun addPlaylist(c: MatrixCursor, p: PlaylistRow) {
+        c.newRow().apply {
+            add(Document.COLUMN_DOCUMENT_ID, DocId.Playlist(p.id).encoded)
+            add(Document.COLUMN_MIME_TYPE, PLAYLIST_MIME)
+            add(Document.COLUMN_DISPLAY_NAME, cleanName(p.name) + DocId.PLAYLIST_EXT)
+            add(Document.COLUMN_LAST_MODIFIED, shown(p.lastModified))
+            add(Document.COLUMN_FLAGS, 0)
+        }
+    }
+
+    /**
+     * @param position 1-based order within its folder, for Poweramp's "By Track #" folder sorting.
+     * @param lyrics only when the caller asked for the lyrics columns.
+     */
+    private fun addTrack(c: MatrixCursor, t: TrackRow, position: Int?, lyrics: TrackLyrics? = null) {
         c.newRow().apply {
             add(Document.COLUMN_DOCUMENT_ID, DocId.Track(t.id).encoded)
             add(Document.COLUMN_MIME_TYPE, t.contentType ?: t.suffix?.let { "audio/$it" } ?: "audio/*")
             add(Document.COLUMN_DISPLAY_NAME, displayName(t))
-            add(Document.COLUMN_LAST_MODIFIED, t.lastModified)
+            add(Document.COLUMN_LAST_MODIFIED, shown(t.lastModified))
             add(Document.COLUMN_SIZE, t.sizeBytes)
             add(Document.COLUMN_FLAGS, if (t.coverArt != null) Document.FLAG_SUPPORTS_THUMBNAIL else 0)
 
@@ -235,9 +285,8 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             add(TrackProviderConsts.COLUMN_ALBUM_ARTIST, t.albumArtist)
             add(MediaStore.Audio.AudioColumns.COMPOSER, t.composer)
             add(TrackProviderConsts.COLUMN_GENRE, t.genre)
+            // Poweramp never asks for a disc number, so multi-disc order is carried by this alone.
             add(MediaStore.Audio.AudioColumns.TRACK, trackNumber(t))
-            // Not in Poweramp's documented provider columns; standard MediaStore name, sent in case it's read.
-            add(MediaStore.Audio.AudioColumns.DISC_NUMBER, t.discNo)
             if (position != null) add(TrackProviderConsts.COLUMN_TRACK_ALT, position)
             add(MediaFormat.KEY_SAMPLE_RATE, t.sampleRate)
             add(MediaFormat.KEY_CHANNEL_COUNT, t.channels)
@@ -245,6 +294,102 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             add(TrackProviderConsts.COLUMN_BITS_PER_SAMPLE, t.bitDepth)
             // Empty wave: use Poweramp's default seekbar instead of downloading every track to scan it.
             add(TrackProviderConsts.COLUMN_TRACK_WAVE, ByteArray(0))
+            if (lyrics != null) {
+                add(TrackProviderConsts.COLUMN_TRACK_LYRICS, lyrics.plain)
+                add(TrackProviderConsts.COLUMN_TRACK_LYRICS_SYNCED, lyrics.synced)
+                if (!lyrics.isEmpty) add(TrackProviderConsts.COLUMN_FLAGS, TrackProviderConsts.FLAG_HAS_LYRICS)
+            }
+        }
+    }
+
+    // ---- lyrics ----
+
+    private fun wantsLyrics(projection: Array<out String>?) = projection?.any {
+        it == TrackProviderConsts.COLUMN_TRACK_LYRICS || it == TrackProviderConsts.COLUMN_TRACK_LYRICS_SYNCED
+    } == true
+
+    /** Blocks the binder thread, as providers do; bounded so a dead server can't hang Poweramp's Lyrics view. */
+    private fun lyricsFor(t: TrackRow): TrackLyrics? {
+        val server = currentServer() ?: return null
+        val result = runBlocking(Dispatchers.IO) {
+            withTimeoutOrNull(LYRICS_TIMEOUT_MS) { app.lyrics.get(client(server), t.id, t.artist, t.title) }
+        }
+        Log.i(TAG, "Lyrics for ${t.id}: ${result?.let { if (it.isEmpty) "none" else if (it.synced != null) "synced" else "plain" } ?: "unavailable"}")
+        return result
+    }
+
+    // ---- playlists ----
+
+    /** The Playlists folder sits in the first library's root, and only exists when there are playlists. */
+    private fun playlistsParent(): DocId.Library? {
+        if (db.counts().playlists == 0) return null
+        return db.libraryFolders().firstOrNull()?.let { DocId.Library(it.id) }
+    }
+
+    private fun playlistsLastModified(): Long = maxOf(
+        db.folderLastModified(FolderKind.PLAYLISTS, FolderKind.PLAYLISTS_ID) ?: 0,
+        db.playlistRows().maxOfOrNull { it.lastModified } ?: 0,
+    )
+
+    /** Writes the playlist as a cache file (Poweramp may seek in it, so not a pipe). */
+    private fun writePlaylistFile(playlistId: String): File? {
+        val playlist = db.playlistRow(playlistId) ?: return null
+        val text = playlistText(playlist.name, db.playlistTracks(playlistId))
+        val dir = File(context!!.cacheDir, "playlists").apply { mkdirs() }
+        val name = MessageDigest.getInstance("SHA-256").digest(playlistId.toByteArray())
+            .take(12).joinToString("") { "%02x".format(it) }
+        val file = File(dir, "$name${DocId.PLAYLIST_EXT}")
+        val tmp = File.createTempFile(name, ".tmp", dir)
+        tmp.writeText(text, Charsets.UTF_8)
+        if (!tmp.renameTo(file)) {
+            tmp.delete()
+            throw java.io.IOException("Could not write playlist file")
+        }
+        return file
+    }
+
+    /**
+     * Entries are paths relative to the Playlists folder ("../Artist/Album/file.flac"), built from the
+     * folders' display names. Poweramp (build 1035) resolves them against the playlist's own folder:
+     * seen on device, "../Artist/Album/file" played our tracks, while the readme's "Album/file" form
+     * resolved to "<root>/Album/file", which doesn't exist.
+     */
+    private fun playlistText(name: String, tracks: List<TrackRow>): String {
+        val albumDirs = HashMap<String, String>()
+        fun dirOf(t: TrackRow): String {
+            val albumId = t.albumId ?: return ""
+            return albumDirs.getOrPut(albumId) {
+                val album = db.albumFolder(albumId) ?: return@getOrPut ""
+                val artist = album.albumArtistId?.let { db.artistFolder(album.libraryId, it) }
+                listOfNotNull(artist?.name, album.name).joinToString("") { cleanName(it) + "/" }
+            }
+        }
+        return buildString {
+            append("#EXTM3U\n")
+            append("#PLAYLIST:").append(name.replace('\n', ' ')).append('\n')
+            // TEMPORARY format probe (debug builds): the first track in several entry forms, to see
+            // which Poweramp resolves. Remove once settled.
+            val probe = tracks.firstOrNull()
+            if (probe != null && (context!!.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                val album = probe.albumId?.let { db.albumFolder(it)?.name }?.let(::cleanName) ?: ""
+                val file = displayName(probe)
+                val tree = "content://$AUTHORITY/tree/" + Uri.encode(DocId.Library(probe.libraryId).encoded)
+                listOf(
+                    "PROBE1 relative-up" to "../${dirOf(probe)}$file",
+                    "PROBE2 album-file" to "$album/$file",
+                    "PROBE3 at-authority" to "@$AUTHORITY/${Uri.encode(DocId.Library(probe.libraryId).encoded)}/${dirOf(probe)}$file",
+                    "PROBE4 tree-doc-uri" to "$tree/document/${Uri.encode(DocId.Track(probe.id).encoded)}",
+                    "PROBE5 doc-uri" to DocumentsContract.buildDocumentUri(AUTHORITY, DocId.Track(probe.id).encoded).toString(),
+                ).forEach { (label, entry) ->
+                    append("#EXTINF:").append(probe.durationSec ?: -1).append(',').append(label).append('\n')
+                    append(entry).append('\n')
+                }
+            }
+            tracks.forEach { t ->
+                val label = listOfNotNull(t.artist, t.title).joinToString(" - ").replace('\n', ' ')
+                append("#EXTINF:").append(t.durationSec ?: -1).append(',').append(label).append('\n')
+                append("../").append(dirOf(t)).append(displayName(t)).append('\n')
+            }
         }
     }
 
@@ -259,6 +404,8 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         is DocId.Track -> db.track(doc.trackId)?.let { t ->
             t.albumId?.let { DocId.Album(it) } ?: DocId.Library(t.libraryId)
         }
+        DocId.Playlists -> playlistsParent()
+        is DocId.Playlist -> DocId.Playlists
     }
 
     private fun currentServer(): SavedServer? = app.credentialStore.server.value ?: app.credentialStore.load()
@@ -288,6 +435,19 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         const val AUTHORITY = "dev.subsonic.poweramp.provider"
         private const val TAG = "SubsonicProvider"
         private const val MAX_DEPTH = 4
+        private const val LYRICS_TIMEOUT_MS = 10_000L
+
+        /**
+         * When the provider last changed how it presents existing data (here: track file names built
+         * from tags, playlist entry format, 2026-11-12). Poweramp only re-reads folders whose time
+         * changed, so no folder or track is reported as older than this. Raise it whenever names,
+         * playlist contents or columns change.
+         */
+        const val PRESENTATION_CHANGED_AT = 1_794_482_000_000L
+
+        fun shown(lastModified: Long) = maxOf(lastModified, PRESENTATION_CHANGED_AT)
+        const val PLAYLISTS_FOLDER_NAME = "Playlists"
+        private const val PLAYLIST_MIME = "audio/x-mpegurl"
 
         private val ROOT_PROJECTION = arrayOf(
             Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID, Root.COLUMN_TITLE,
@@ -311,15 +471,19 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         }
 
         /**
-         * File-like name Poweramp shows with "Show file names" and uses to match playlist entries
-         * (parent folder + file name). Navidrome's own file name is stable and has the extension.
+         * File-like name Poweramp shows in Folders and uses to match playlist entries (parent folder +
+         * file name). Built from the tags ("01. Title.flac"): Navidrome's `path` is normally not the
+         * real file but one it makes up ("Artist/Album/01-01 - Title.flac"). Its last segment is the
+         * fallback when the track has no title.
          */
         fun displayName(t: TrackRow): String {
+            val ext = t.suffix?.takeIf { it.isNotBlank() }?.let { ".$it" } ?: ""
+            if (t.title.isNotBlank()) {
+                val number = t.trackNo?.takeIf { it > 0 }?.let { "%02d. ".format(java.util.Locale.ROOT, it) } ?: ""
+                return cleanName("$number${t.title.trim()}$ext")
+            }
             val fromPath = t.path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-            if (fromPath != null) return cleanName(fromPath)
-            val number = t.trackNo?.let { "%02d - ".format(it) } ?: ""
-            val ext = t.suffix?.let { ".$it" } ?: ""
-            return cleanName("$number${t.title}$ext")
+            return cleanName(fromPath ?: "")
         }
 
         /** '/' would break Poweramp's path-style matching. */

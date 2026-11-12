@@ -26,9 +26,22 @@ sealed interface DocId {
         override val encoded get() = "track:$trackId"
     }
 
+    /** Folder holding one .m3u8 per server playlist; lives under the first library's root. */
+    data object Playlists : DocId {
+        override val encoded get() = "playlists"
+    }
+
+    /** Ends in .m3u8 like the display name, in case a client goes by the id. */
+    data class Playlist(val playlistId: String) : DocId {
+        override val encoded get() = "playlist:$playlistId$PLAYLIST_EXT"
+    }
+
     companion object {
+        const val PLAYLIST_EXT = ".m3u8"
+
         /** Returns null for anything that isn't one of ours. */
         fun parse(encoded: String): DocId? {
+            if (encoded == Playlists.encoded) return Playlists
             val kind = encoded.substringBefore(':', missingDelimiterValue = "")
             val rest = encoded.substringAfter(':', missingDelimiterValue = "")
             if (rest.isEmpty()) return null
@@ -42,6 +55,7 @@ sealed interface DocId {
                 }
                 "album" -> Album(rest)
                 "track" -> Track(rest)
+                "playlist" -> rest.removeSuffix(PLAYLIST_EXT).takeIf { it.isNotEmpty() && rest.endsWith(PLAYLIST_EXT) }?.let(::Playlist)
                 else -> null
             }
         }

@@ -10,13 +10,22 @@ An Android app that makes a Subsonic / OpenSubsonic server (developed against **
 | 1 | Subsonic client, login screen, encrypted credentials | done |
 | 2 | Local library database, scheduled sync | done |
 | 3 | Poweramp track provider (browse + stream) | done, see known limitations |
-| 4 | Lyrics, playlists in Poweramp, scrobbling | next |
+| 4 | Lyrics, playlists in Poweramp, scrobbling | done, see known limitations |
 | 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | planned |
 
-### Known limitations (phase 3)
+### Known limitations (phases 3–4)
 
 Tracks are handed to Poweramp as "dynamic URL" tracks: Poweramp asks for a fresh stream URL at
 playback time. Tested on Poweramp build 1035, this means:
+
+- **Seeking doesn't work** (seekbar or tapping a lyric line): Poweramp reads the stream once from
+  the start and never asks the server for another position, so a seek goes silent.
+- **Playlist entries don't resolve:** the Playlists folder and its `.m3u8` files appear, but
+  Poweramp can't match entries to URL tracks by folder/file name. Document-URI entries reach the
+  provider but fail because tracks can't be opened as files yet. Debug builds start each playlist
+  with "PROBE" entries in five formats to test this; they go once a format is settled.
+- **The stream URL, including the login token, is in Poweramp's track-change broadcasts**, which any
+  app registered for them can read.
 
 - **Info/Tags shows the track as a "Stream"** with empty Title/Genre/Artist fields. Poweramp does not
   ask the provider for tags there for URL tracks. The player, lists and library categories do show
@@ -24,8 +33,8 @@ playback time. Tested on Poweramp build 1035, this means:
 - **Info/Tags displays the full stream URL, including the login token** (`u`, `t`, `s`). The token
   stays valid until the Navidrome password changes.
 
-Phase 5 fixes both by streaming the audio through the app (a proxy file descriptor with HTTP range
-requests), so Poweramp treats tracks as files and never sees a URL.
+Phase 5 addresses all of these by streaming the audio through the app (a seekable file descriptor
+backed by HTTP range requests), so Poweramp treats tracks as files and never sees a URL.
 
 ## How it works
 
@@ -48,6 +57,21 @@ requests), so Poweramp treats tracks as files and never sees a URL.
   If Poweramp ignores that (it only accepts scan requests while it or the app is in the foreground),
   the request is retried when Poweramp starts playing. Rescan in Poweramp also triggers a server sync
   if the last one is over 10 minutes old.
+- **Lyrics:** fetched when Poweramp's Lyrics view asks for a track (`getLyricsBySongId`, or classic
+  `getLyrics` on servers without it). Synced lyrics are converted to LRC. Answers, including "no
+  lyrics", are cached on disk for 30 days (3 days for "none").
+- **File names:** built from the tags (`01. Title.flac`). Navidrome's `path` is normally made up
+  (`Artist/Album/01-01 - Title.flac`), so it's only a fallback for tracks without a title. When the
+  way existing data is presented changes, `PRESENTATION_CHANGED_AT` in the provider is raised so
+  Poweramp re-reads every folder.
+- **Playlists:** server playlists appear as `.m3u8` files in a "Playlists" folder in the first
+  library's root (entries don't resolve yet, see known limitations). One way: changes made in
+  Poweramp are not sent back.
+- **Scrobbling:** Poweramp's track/status broadcasts tell the app what plays. For our tracks it sends
+  "now playing" (OpenSubsonic `reportPlayback`, or `scrobble` with `submission=false`) and, once a
+  track has played for half its length or 4 minutes (tracks under 30 s never count), queues a
+  scrobble with the start time. Queued plays are sent by WorkManager when there's a network, so plays
+  made offline are sent later. Can be turned off in the app.
 
 ## Project layout
 
@@ -56,8 +80,10 @@ app/src/main/java/dev/subsonic/poweramp/
   subsonic/   Subsonic API client (no Android dependencies; unit-tested on the JVM)
   sync/       Sync logic (pure Kotlin) plus WorkManager worker, status and settings
   library/    SQLite library database (albums and artists are views over tracks)
-  provider/   Poweramp track provider (DocumentsProvider), document ids, cover cache
-  poweramp/   Poweramp API constants and rescan requests
+  provider/   Poweramp track provider (DocumentsProvider), document ids, cover cache, playlist files
+  lyrics/     Lyrics fetching, LRC conversion and cache
+  scrobble/   Playback tracking from Poweramp broadcasts, scrobble queue and worker
+  poweramp/   Poweramp API constants, rescan requests, broadcast receiver
   settings/   Saved server and encrypted credential storage
   ui/         Compose screens
 app/src/main/java/com/maxmpz/poweramp/player/TrackProviderConsts.java
@@ -111,7 +137,7 @@ Debug builds log every HTTP request under the `SubsonicHttp` tag with credential
 (`u=***&t=***&s=***`):
 
 ```bash
-adb logcat -s SubsonicHttp SyncWorker SubsonicProvider PowerampRescans
+adb logcat -s SubsonicHttp SyncWorker SubsonicProvider PowerampRescans Scrobbler ScrobbleWorker SubsonicLyrics
 ```
 
 `SubsonicProvider` logs each distinct set of columns Poweramp requests, scan starts, playback-URL

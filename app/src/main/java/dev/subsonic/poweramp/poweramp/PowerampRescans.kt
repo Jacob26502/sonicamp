@@ -11,6 +11,8 @@ import dev.subsonic.poweramp.provider.SubsonicDocumentsProvider
 import dev.subsonic.poweramp.sync.SyncStatusStore
 import dev.subsonic.poweramp.sync.SyncSettingsStore
 import dev.subsonic.poweramp.sync.SyncWorker
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Keeps Poweramp's copy of the library in step with ours.
@@ -97,14 +99,32 @@ class PowerampRescans(
     }
 }
 
-/** Receives Poweramp's explicit playback-status broadcast (delivered even when we're in the background). */
-class PowerampStatusReceiver : BroadcastReceiver() {
+/**
+ * Receives Poweramp's explicit status and track broadcasts (delivered even when we're in the
+ * background): retries pending rescans, and feeds the scrobbler.
+ */
+class PowerampEventReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != PowerampApi.ACTION_STATUS_CHANGED_EXPLICIT) return
         try {
-            (context.applicationContext as SubsonicApp).powerampRescans.onPowerampActive()
+            val app = context.applicationContext as SubsonicApp
+            if (intent.action == PowerampApi.ACTION_STATUS_CHANGED_EXPLICIT) app.powerampRescans.onPowerampActive()
+            val outputs = app.scrobbler.handle(intent)
+            if (outputs.isEmpty()) return
+            // Keep the process alive while reports go out; the receiver's time limit is ~10 s.
+            val pending = goAsync()
+            app.appScope.launch {
+                try {
+                    withTimeoutOrNull(DELIVERY_TIMEOUT_MS) { app.scrobbler.deliver(outputs) }
+                } finally {
+                    pending.finish()
+                }
+            }
         } catch (t: Throwable) {
-            Log.e("PowerampStatusReceiver", "onReceive", t)
+            Log.e("PowerampEventReceiver", "onReceive", t)
         }
+    }
+
+    private companion object {
+        const val DELIVERY_TIMEOUT_MS = 8_000L
     }
 }

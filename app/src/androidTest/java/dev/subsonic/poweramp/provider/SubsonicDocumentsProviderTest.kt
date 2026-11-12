@@ -16,6 +16,7 @@ import dev.subsonic.poweramp.subsonic.SubsonicAuth
 import dev.subsonic.poweramp.sync.LibraryRecord
 import dev.subsonic.poweramp.sync.LibraryUpdate
 import dev.subsonic.poweramp.sync.PlaylistDiff
+import dev.subsonic.poweramp.sync.PlaylistRecord
 import dev.subsonic.poweramp.sync.TrackDiff
 import dev.subsonic.poweramp.sync.TrackRecord
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -115,7 +116,8 @@ class SubsonicDocumentsProviderTest {
         val artists = children("lib:1")
         assertEquals(listOf("Andora", "Kosaki"), artists.map { it[Document.COLUMN_DISPLAY_NAME] })
         assertTrue(artists.all { it[Document.COLUMN_MIME_TYPE] == Document.MIME_TYPE_DIR })
-        assertEquals(1_000L, artists[0][Document.COLUMN_LAST_MODIFIED])
+        // Test data is older than the last presentation change, so that time is reported.
+        assertEquals(SubsonicDocumentsProvider.PRESENTATION_CHANGED_AT, artists[0][Document.COLUMN_LAST_MODIFIED])
 
         // Poweramp asks for its custom __flags column explicitly; it's not in the default projection.
         val albums = children(
@@ -144,7 +146,7 @@ class SubsonicDocumentsProviderTest {
         assertEquals("Title d1t1", first[MediaStore.MediaColumns.TITLE])
         assertEquals(200_000L, first[MediaStore.Audio.AudioColumns.DURATION])
         assertEquals(TrackProviderConsts.DYNAMIC_URL, first[TrackProviderConsts.COLUMN_URL])
-        assertEquals("1-1 d1t1.flac", first[Document.COLUMN_DISPLAY_NAME])
+        assertEquals("01. Title d1t1.flac", first[Document.COLUMN_DISPLAY_NAME])
         assertEquals("audio/flac", first[Document.COLUMN_MIME_TYPE])
         assertEquals("Kosaki", first[TrackProviderConsts.COLUMN_ALBUM_ARTIST])
         assertEquals(24L, first[TrackProviderConsts.COLUMN_BITS_PER_SAMPLE])
@@ -194,6 +196,66 @@ class SubsonicDocumentsProviderTest {
 
         val meta = resolver.call(album, TrackProviderConsts.CALL_GET_DIR_METADATA, album.toString(), null)!!
         assertEquals(listOf("lib:1", "artist:1:ar-Kosaki"), meta.getStringArray(TrackProviderConsts.EXTRA_ANCESTORS)!!.toList())
+    }
+
+    private fun addPlaylist() = app.libraryDatabase.apply(
+        LibraryUpdate(
+            identity = "test",
+            libraries = listOf(LibraryRecord(1, "Music Library")),
+            tracks = TrackDiff(emptyList(), emptyList(), emptySet()),
+            playlists = PlaylistDiff(
+                listOf(PlaylistRecord("pl1", "Road/Trip", null, null, 3, 600, "c1", null, listOf("solo", "d2t1", "gone"))),
+                emptySet(),
+            ),
+            syncedAt = 5_000,
+        )
+    )
+
+    @Test
+    fun noPlaylistsFolderWithoutPlaylists() {
+        assertFalse(children("lib:1").any { it[Document.COLUMN_DOCUMENT_ID] == "playlists" })
+    }
+
+    @Test
+    fun playlistsFolderHoldsM3u8Files() {
+        addPlaylist()
+        val root = children("lib:1")
+        assertEquals("playlists", root.first()[Document.COLUMN_DOCUMENT_ID])
+        assertEquals("Playlists", root.first()[Document.COLUMN_DISPLAY_NAME])
+        assertEquals(SubsonicDocumentsProvider.shown(5_000), root.first()[Document.COLUMN_LAST_MODIFIED])
+
+        val playlists = children("playlists")
+        val pl = playlists.single()
+        assertEquals("playlist:pl1.m3u8", pl[Document.COLUMN_DOCUMENT_ID])
+        assertEquals("Road∕Trip.m3u8", pl[Document.COLUMN_DISPLAY_NAME])
+        assertEquals("audio/x-mpegurl", pl[Document.COLUMN_MIME_TYPE])
+
+        val uri = DocumentsContract.buildDocumentUri(authority, "playlist:pl1.m3u8")
+        val text = resolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+        assertEquals(
+            listOf(
+                "#EXTM3U",
+                "#PLAYLIST:Road/Trip",
+                "#EXTINF:200,Andora - Title solo",
+                "../Andora/Single/01. Title solo.flac",
+                "#EXTINF:200,Kosaki - Title d2t1",
+                "../Kosaki/OST/01. Title d2t1.flac",
+            ),
+            text.trim().lines(),
+        )
+
+        // Tree access and ancestors work for playlists too.
+        val tree = DocumentsContract.buildTreeDocumentUri(authority, "lib:1")
+        val inTree = DocumentsContract.buildDocumentUriUsingTree(tree, "playlist:pl1.m3u8")
+        assertEquals(1, resolver.query(inTree, null, null, null, null)!!.use { it.count })
+        val meta = resolver.call(inTree, TrackProviderConsts.CALL_GET_DIR_METADATA, inTree.toString(), null)!!
+        assertEquals(listOf("lib:1", "playlists"), meta.getStringArray(TrackProviderConsts.EXTRA_ANCESTORS)!!.toList())
+    }
+
+    @Test
+    fun tracksAreNotOpenable() {
+        val uri = DocumentsContract.buildDocumentUri(authority, "track:d1t1")
+        assertTrue(runCatching { resolver.openInputStream(uri)!!.close() }.isFailure)
     }
 
     @Test

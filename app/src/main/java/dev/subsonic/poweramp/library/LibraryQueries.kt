@@ -149,6 +149,32 @@ fun LibraryDatabase.tracksWithoutAlbum(libraryId: Int): List<TrackRow> = query(
 fun LibraryDatabase.track(trackId: String): TrackRow? =
     query("$TRACK_SELECT WHERE id = ?", trackId, map = ::trackOf).firstOrNull()
 
+data class PlaylistRow(val id: String, val name: String, val songCount: Int, val lastModified: Long)
+
+/**
+ * A playlist's file changes when the playlist does, or when one of its tracks does (its path in the
+ * folder tree may have moved), so its last-modified time covers both.
+ */
+private const val PLAYLIST_SELECT = """
+    SELECT p.id, p.name, p.song_count,
+           MAX(p.last_modified, COALESCE((SELECT MAX(t.last_modified) FROM playlist_entries e
+                                          JOIN tracks t ON t.id = e.track_id WHERE e.playlist_id = p.id), 0))
+    FROM playlists p"""
+
+private fun playlistOf(c: Cursor) = PlaylistRow(c.getString(0), c.getString(1), c.getInt(2), c.getLong(3))
+
+fun LibraryDatabase.playlistRows(): List<PlaylistRow> =
+    query("$PLAYLIST_SELECT ORDER BY p.name COLLATE NOCASE", map = ::playlistOf)
+
+fun LibraryDatabase.playlistRow(id: String): PlaylistRow? =
+    query("$PLAYLIST_SELECT WHERE p.id = ?", id, map = ::playlistOf).firstOrNull()
+
+/** Tracks of a playlist in order; entries whose track isn't in the library are skipped. */
+fun LibraryDatabase.playlistTracks(playlistId: String): List<TrackRow> = query(
+    "$TRACK_SELECT JOIN playlist_entries e ON e.track_id = t.id WHERE e.playlist_id = ? ORDER BY e.position",
+    playlistId, map = ::trackOf,
+)
+
 private fun <T> LibraryDatabase.query(sql: String, vararg args: String, map: (Cursor) -> T): List<T> =
     readableDatabase.rawQuery(sql, args).use { c -> buildList { while (c.moveToNext()) add(map(c)) } }
 

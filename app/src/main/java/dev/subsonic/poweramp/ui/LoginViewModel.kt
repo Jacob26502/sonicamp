@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.subsonic.poweramp.SubsonicApp
+import dev.subsonic.poweramp.scrobble.ScrobbleWorker
 import dev.subsonic.poweramp.settings.SavedServer
 import dev.subsonic.poweramp.subsonic.ConnectionTester
 import dev.subsonic.poweramp.subsonic.ServerInfo
@@ -113,6 +114,9 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         val success = _state.value.result as? TestResult.Success ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) { app.credentialStore.save(success.server) }
+            app.serverFeatures.clear()
+            // Plays queued while the login was rejected can go now (other servers' plays are dropped).
+            ScrobbleWorker.enqueue(app)
             app.syncStatus.clearAuthFailure()
             SyncNotifications.cancelAuthFailed(app)
             val settings = app.syncSettings.settings.value
@@ -127,11 +131,15 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         testJob?.cancel()
         viewModelScope.launch {
             SyncWorker.cancelAll(app)
+            ScrobbleWorker.cancel(app)
             withContext(Dispatchers.IO) {
                 app.credentialStore.clear()
                 app.libraryDatabase.wipe()
                 app.coverCache.clear()
+                app.lyrics.clear()
+                app.scrobbler.reset()
             }
+            app.serverFeatures.clear()
             app.syncStatus.clear()
             SyncNotifications.cancelAuthFailed(app)
             // Let Poweramp drop the tracks; we're in the foreground, so the request is honoured.

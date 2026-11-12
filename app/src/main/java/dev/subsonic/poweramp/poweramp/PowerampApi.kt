@@ -15,6 +15,32 @@ object PowerampApi {
     /** Sent explicitly to registered apps when playback status changes; arrives even in the background. */
     const val ACTION_STATUS_CHANGED_EXPLICIT = "com.maxmpz.audioplayer.STATUS_CHANGED_EXPLICIT"
 
+    /** Sent explicitly to registered apps when the track changes (Poweramp caches the app list). Extras: track, ts. */
+    const val ACTION_TRACK_CHANGED_EXPLICIT = "com.maxmpz.audioplayer.TRACK_CHANGED_EXPLICIT"
+
+    /** int, one of the STATE_* values. */
+    const val EXTRA_STATE = "state"
+    const val EXTRA_PAUSED = "paused"
+    /** Bundle with [Track] fields. */
+    const val EXTRA_TRACK = "track"
+    /** int, optional: position in the track, in seconds. */
+    const val EXTRA_POSITION = "pos"
+    /** long, System.currentTimeMillis() of the event. */
+    const val EXTRA_TIMESTAMP = "ts"
+
+    const val STATE_NO_STATE = -1
+    const val STATE_STOPPED = 0
+    const val STATE_PLAYING = 1
+    const val STATE_PAUSED = 2
+
+    object Track {
+        const val PATH = "path"
+        /** Seconds. */
+        const val DURATION = "dur"
+        /** Milliseconds (since build 948). */
+        const val DURATION_MS = "durMs"
+    }
+
     object Scanner {
         const val ACTION_SCAN_DIRS = "com.maxmpz.audioplayer.ACTION_SCAN_DIRS"
 

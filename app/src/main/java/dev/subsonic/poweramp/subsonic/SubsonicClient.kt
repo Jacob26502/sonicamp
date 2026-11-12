@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import okhttp3.HttpUrl
@@ -69,6 +70,53 @@ class SubsonicClient(
     suspend fun scanStatus(): ScanStatus {
         val element = get("getScanStatus")["scanStatus"] ?: return ScanStatus()
         return json.decodeFromJsonElement(ScanStatus.serializer(), element)
+    }
+
+    /** Lyrics embedded in or next to the song file (OpenSubsonic `songLyrics`). Empty if there are none. */
+    suspend fun lyricsBySongId(songId: String): List<StructuredLyrics> =
+        decodeList(
+            get("getLyricsBySongId", listOf("id" to songId)).obj("lyricsList")?.get("structuredLyrics"),
+            StructuredLyrics.serializer(),
+        )
+
+    /** Classic Subsonic lyrics search by artist and title; plain text, or null if none. */
+    suspend fun lyrics(artist: String?, title: String): String? {
+        val params = buildList {
+            artist?.let { add("artist" to it) }
+            add("title" to title)
+        }
+        val value = (get("getLyrics", params).obj("lyrics")?.get("value") as? JsonPrimitive)?.content
+        return value?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Counts a play ([submission] true, with the time it started) or sets "now playing" (false).
+     * Works on every Subsonic server.
+     */
+    suspend fun scrobble(songId: String, playedAtMs: Long?, submission: Boolean) {
+        val params = buildList {
+            add("id" to songId)
+            playedAtMs?.let { add("time" to it.toString()) }
+            add("submission" to submission.toString())
+        }
+        get("scrobble", params)
+    }
+
+    /**
+     * Live playback state (OpenSubsonic `playbackReport`), shown by the server as "now playing".
+     * [ignoreScrobble] true leaves play counting to [scrobble].
+     */
+    suspend fun reportPlayback(songId: String, state: String, positionMs: Long, ignoreScrobble: Boolean = true) {
+        get(
+            "reportPlayback",
+            listOf(
+                "mediaId" to songId,
+                "mediaType" to "song",
+                "positionMs" to positionMs.toString(),
+                "state" to state,
+                "ignoreScrobble" to ignoreScrobble.toString(),
+            ),
+        )
     }
 
     /** URL that streams a song. Contains credentials: treat it as a secret. */

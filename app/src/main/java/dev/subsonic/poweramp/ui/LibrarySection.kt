@@ -37,6 +37,7 @@ fun LibrarySection(
     onIntervalChange: (Int) -> Unit,
     onWifiOnlyChange: (Boolean) -> Unit,
     onAskPowerampRescan: () -> Unit,
+    onScrobbleChange: (Boolean) -> Unit,
     onForget: () -> Unit,
 ) {
     var confirmForget by remember { mutableStateOf(false) }
@@ -118,6 +119,23 @@ fun LibrarySection(
         style = MaterialTheme.typography.bodySmall,
     )
     Button(onClick = onAskPowerampRescan) { Text("Ask Poweramp to rescan") }
+    Text(
+        "Playlists from the server appear in a Playlists folder; Poweramp imports them when it scans.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Scrobble plays to the server", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Shows what's playing and counts plays (half the track or 4 minutes). " +
+                    "Plays made offline are sent later.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        Switch(checked = state.scrobbleEnabled, onCheckedChange = onScrobbleChange)
+    }
 
     TextButton(onClick = { confirmForget = true }) {
         Text("Forget server", color = MaterialTheme.colorScheme.error)

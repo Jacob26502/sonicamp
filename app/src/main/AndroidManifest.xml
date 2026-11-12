@@ -55,12 +55,16 @@
             </intent-filter>
         </provider>
 
-        <!-- Poweramp sends this explicitly when playback starts/stops; used to retry a pending rescan. -->
+        <!--
+          Poweramp sends these explicitly to apps that declare them here: playback started/paused/stopped
+          (also used to retry a pending rescan) and track changed. Used for scrobbling our tracks.
+        -->
         <receiver
-            android:name=".poweramp.PowerampStatusReceiver"
+            android:name=".poweramp.PowerampEventReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.maxmpz.audioplayer.STATUS_CHANGED_EXPLICIT" />
+                <action android:name="com.maxmpz.audioplayer.TRACK_CHANGED_EXPLICIT" />
             </intent-filter>
         </receiver>
     </application>

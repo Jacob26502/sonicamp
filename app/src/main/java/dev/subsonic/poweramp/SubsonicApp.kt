@@ -5,17 +5,23 @@ import android.content.pm.ApplicationInfo
 import android.provider.DocumentsContract
 import android.util.Log
 import dev.subsonic.poweramp.library.LibraryDatabase
+import dev.subsonic.poweramp.lyrics.LyricsRepository
 import dev.subsonic.poweramp.poweramp.PowerampRescans
 import dev.subsonic.poweramp.provider.CoverCache
 import dev.subsonic.poweramp.provider.SubsonicDocumentsProvider
+import dev.subsonic.poweramp.scrobble.Scrobbler
 import java.io.File
 import dev.subsonic.poweramp.settings.CredentialStore
 import dev.subsonic.poweramp.subsonic.RedactingLogInterceptor
+import dev.subsonic.poweramp.subsonic.ServerFeatures
 import dev.subsonic.poweramp.subsonic.SubsonicClient
 import dev.subsonic.poweramp.sync.LibrarySync
 import dev.subsonic.poweramp.sync.SyncNotifications
 import dev.subsonic.poweramp.sync.SyncSettingsStore
 import dev.subsonic.poweramp.sync.SyncStatusStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -46,6 +52,21 @@ class SubsonicApp : Application() {
     val coverCache: CoverCache by lazy { CoverCache(File(cacheDir, "covers"), httpClient) }
 
     val powerampRescans: PowerampRescans by lazy { PowerampRescans(this, libraryDatabase, syncStatus, syncSettings) }
+
+    val serverFeatures: ServerFeatures by lazy { ServerFeatures() }
+
+    val lyrics: LyricsRepository by lazy { LyricsRepository(File(cacheDir, "lyrics"), serverFeatures) }
+
+    val scrobbler: Scrobbler by lazy { Scrobbler(this) }
+
+    /** For short background work started from broadcast receivers. */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Client for the saved server, or null if none is configured. */
+    fun currentClient(): SubsonicClient? {
+        val server = credentialStore.server.value ?: credentialStore.load() ?: return null
+        return SubsonicClient(server.baseUrl, server.auth, httpClient)
+    }
 
     /** Tells Storage Access Framework clients (pickers, Poweramp's folder dialog) the roots changed. */
     fun notifyProviderRootsChanged() {

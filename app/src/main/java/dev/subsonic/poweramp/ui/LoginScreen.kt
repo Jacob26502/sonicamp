@@ -74,6 +74,7 @@ fun LoginRoute(
                     onIntervalChange = libraryViewModel::setInterval,
                     onWifiOnlyChange = libraryViewModel::setWifiOnly,
                     onAskPowerampRescan = libraryViewModel::askPowerampToRescan,
+                    onScrobbleChange = libraryViewModel::setScrobbleEnabled,
                     onForget = viewModel::forgetServer,
                 )
             }

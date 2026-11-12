@@ -118,6 +118,25 @@ data class ServerInfo(
         }
 }
 
+/** One set of lyrics from getLyricsBySongId (OpenSubsonic `songLyrics`). */
+@Serializable
+data class StructuredLyrics(
+    val lang: String? = null,
+    val synced: Boolean = false,
+    /** Milliseconds; positive means the lyrics should appear sooner. */
+    val offset: Long = 0,
+    val line: List<LyricLine> = emptyList(),
+)
+
+@Serializable
+data class LyricLine(
+    /** Milliseconds from the start of the track; only set for synced lyrics. */
+    val start: Long? = null,
+    val value: String = "",
+)
+
 object Extensions {
     const val API_KEY_AUTH = "apiKeyAuthentication"
+    const val SONG_LYRICS = "songLyrics"
+    const val PLAYBACK_REPORT = "playbackReport"
 }

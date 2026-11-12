@@ -25,6 +25,7 @@ data class LibraryUiState(
     val counts: LibraryCounts? = null,
     /** The library changed since Poweramp last scanned it. */
     val powerampRescanPending: Boolean = false,
+    val scrobbleEnabled: Boolean = true,
 )
 
 class LibraryViewModel(application: Application) : AndroidViewModel(application) {
@@ -44,15 +45,19 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         app.syncStatus.status,
         app.syncSettings.settings,
         libraryInfo,
-    ) { server, status, settings, (counts, pending) ->
+        app.scrobbler.enabled,
+    ) { server, status, settings, (counts, pending), scrobble ->
         LibraryUiState(
             configured = server != null,
             status = status,
             settings = settings,
             counts = counts,
             powerampRescanPending = pending,
+            scrobbleEnabled = scrobble,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
+
+    fun setScrobbleEnabled(enabled: Boolean) = app.scrobbler.setEnabled(enabled)
 
     fun syncNow() = SyncWorker.syncNow(app, app.syncSettings.settings.value)
 
