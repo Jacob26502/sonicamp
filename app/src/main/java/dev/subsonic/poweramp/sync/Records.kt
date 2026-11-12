@@ -29,6 +29,10 @@ data class TrackRecord(
     val coverArt: String?,
     val path: String?,
     val created: String?,
+    val composer: String? = null,
+    val sampleRate: Int? = null,
+    val bitDepth: Int? = null,
+    val channels: Int? = null,
 ) {
     /**
      * Fingerprint of every stored field. Navidrome has no per-song "modified" timestamp, so a
@@ -38,6 +42,7 @@ data class TrackRecord(
         val canonical = listOf(
             libraryId, title, albumId, album, artist, albumArtistId, albumArtist, trackNo, discNo, year,
             genre, durationSec, sizeBytes, suffix, contentType, bitRate, coverArt, path, created,
+            composer, sampleRate, bitDepth, channels,
         ).joinToString(FIELD_SEPARATOR) { it?.toString() ?: NULL_MARKER }
         MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
             .take(16).joinToString("") { "%02x".format(it) }
@@ -78,6 +83,10 @@ fun Song.toTrackRecord(libraryId: Int): TrackRecord {
         coverArt = coverArt,
         path = path,
         created = created,
+        composer = displayComposer?.takeIf { it.isNotBlank() },
+        sampleRate = samplingRate?.takeIf { it > 0 },
+        bitDepth = bitDepth?.takeIf { it > 0 },
+        channels = channelCount?.takeIf { it > 0 },
     )
 }
 

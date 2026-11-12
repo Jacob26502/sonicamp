@@ -68,6 +68,11 @@ data class Song(
     val albumArtists: List<ArtistRef> = emptyList(),
     val displayArtist: String? = null,
     val displayAlbumArtist: String? = null,
+    val displayComposer: String? = null,
+    /** Audio format details (OpenSubsonic); Poweramp shows them in Info/Tags. */
+    val samplingRate: Int? = null,
+    val bitDepth: Int? = null,
+    val channelCount: Int? = null,
 )
 
 @Serializable

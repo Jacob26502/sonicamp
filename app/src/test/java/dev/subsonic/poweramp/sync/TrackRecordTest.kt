@@ -43,6 +43,23 @@ class TrackRecordTest {
     }
 
     @Test
+    fun `composer and audio format are mapped, zeros and blanks dropped`() {
+        val r = song.copy(displayComposer = "Kosaki", samplingRate = 44100, bitDepth = 24, channelCount = 2).toTrackRecord(1)
+        assertEquals("Kosaki", r.composer)
+        assertEquals(44100, r.sampleRate)
+        assertEquals(24, r.bitDepth)
+        assertEquals(2, r.channels)
+
+        val empty = song.copy(displayComposer = " ", samplingRate = 0, bitDepth = 0, channelCount = 0).toTrackRecord(1)
+        assertEquals(null, empty.composer)
+        assertEquals(null, empty.sampleRate)
+        assertEquals(null, empty.bitDepth)
+        assertEquals(null, empty.channels)
+
+        assertNotEquals(r.contentHash, song.copy(displayComposer = "Other", samplingRate = 44100, bitDepth = 24, channelCount = 2).toTrackRecord(1).contentHash)
+    }
+
+    @Test
     fun `null and empty string hash differently`() {
         assertNotEquals(
             song.copy(genre = null).toTrackRecord(1).contentHash,

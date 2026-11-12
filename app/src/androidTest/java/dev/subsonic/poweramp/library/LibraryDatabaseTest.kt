@@ -36,6 +36,7 @@ class LibraryDatabaseTest {
         albumArtistId = "ar-$albumArtist", albumArtist = albumArtist, trackNo = 1, discNo = 1, year = 2024,
         genre = null, durationSec = 100, sizeBytes = 1000, suffix = "flac", contentType = "audio/flac",
         bitRate = 900, coverArt = "mf-$id", path = "$albumArtist/$album/$id.flac", created = null,
+        composer = "Comp", sampleRate = 44100, bitDepth = 16, channels = 2,
     )
 
     private fun update(
@@ -53,6 +54,10 @@ class LibraryDatabaseTest {
         syncedAt = at,
     )
 
+    private fun album(name: String) = db.folderLastModified(FolderKind.ALBUM, "al-$name")
+    private fun artist(name: String) = db.folderLastModified(FolderKind.ARTIST, FolderKind.artistId(1, "ar-$name"))
+    private fun library() = db.folderLastModified(FolderKind.LIBRARY, "1")
+
     @Test
     fun applyStoresTracksAndViewsDeriveAlbumsAndArtists() {
         val a = track("t1", "Epsilon", "Andora")
@@ -68,6 +73,71 @@ class LibraryDatabaseTest {
     }
 
     @Test
+    fun newMetadataColumnsAndAlbumCoverAreStored() {
+        db.apply(update(inserted = listOf(track("t1", "A", "X"), track("t2", "A", "X"))))
+
+        db.readableDatabase.rawQuery("SELECT composer, sample_rate, bit_depth, channels FROM tracks WHERE id = 't1'", null).use {
+            it.moveToFirst()
+            assertEquals("Comp", it.getString(0))
+            assertEquals(44100, it.getInt(1))
+            assertEquals(16, it.getInt(2))
+            assertEquals(2, it.getInt(3))
+        }
+        db.readableDatabase.rawQuery("SELECT cover_art, last_modified FROM albums WHERE id = 'al-A'", null).use {
+            it.moveToFirst()
+            assertEquals("mf-t1", it.getString(0))
+            assertEquals(1_000L, it.getLong(1))
+        }
+    }
+
+    @Test
+    fun removingATrackBumpsOnlyItsFolders() {
+        db.apply(update(inserted = listOf(track("t1", "A", "X"), track("t2", "A", "X"), track("t3", "B", "Y"))))
+
+        db.apply(update(deleted = setOf("t2"), at = 2_000))
+
+        assertEquals(2_000L, album("A"))
+        assertEquals(2_000L, artist("X"))
+        assertEquals(2_000L, library())
+        assertEquals(1_000L, album("B"))
+        assertEquals(1_000L, artist("Y"))
+    }
+
+    @Test
+    fun movingATrackBetweenAlbumsBumpsBoth() {
+        db.apply(update(inserted = listOf(track("t1", "A", "X"), track("t3", "A", "X"), track("t2", "B", "X"))))
+
+        db.apply(update(updated = listOf(track("t1", "B", "X")), at = 2_000))
+
+        assertEquals(2_000L, album("A"))
+        assertEquals(2_000L, album("B"))
+    }
+
+    @Test
+    fun albumMovingToAnotherArtistBumpsOldAndNewArtist() {
+        db.apply(update(inserted = listOf(track("t1", "A", "X"), track("t2", "C", "X"), track("t3", "D", "Y"))))
+
+        // Album A is re-tagged from artist X to artist Y.
+        db.apply(update(updated = listOf(track("t1", "A", "Y")), at = 2_000))
+
+        assertEquals(2_000L, artist("X")) // lost album A
+        assertEquals(2_000L, artist("Y")) // gained album A
+        assertEquals(1_000L, album("C"))
+        assertEquals(1_000L, album("D"))
+    }
+
+    @Test
+    fun foldersOfVanishedAlbumsAndArtistsArePruned() {
+        db.apply(update(inserted = listOf(track("t1", "A", "X"), track("t2", "B", "Y"))))
+
+        db.apply(update(deleted = setOf("t1"), at = 2_000))
+
+        assertNull(album("A"))
+        assertNull(artist("X"))
+        assertEquals(1_000L, album("B"))
+    }
+
+    @Test
     fun updatesAndDeletesApply() {
         db.apply(update(inserted = listOf(track("t1", "A", "X"), track("t2", "A", "X"))))
         val renamed = track("t1", "A", "X", title = "Renamed")
@@ -79,10 +149,12 @@ class LibraryDatabaseTest {
     }
 
     @Test
-    fun noOpSyncDoesNotBumpVersion() {
+    fun noOpSyncDoesNotBumpVersionOrFolders() {
         db.apply(update(inserted = listOf(track("t1", "A", "X"))))
-        db.apply(update())
+        db.apply(update(at = 2_000))
         assertEquals(1L, db.libraryVersion())
+        assertEquals(1_000L, album("A"))
+        assertEquals(1_000L, library())
     }
 
     @Test
@@ -92,11 +164,13 @@ class LibraryDatabaseTest {
 
         assertEquals(listOf("t2", "t1", "t2"), db.playlistTrackIds("p1"))
         assertEquals(mapOf("p1" to "v1"), db.playlistVersions())
+        assertEquals(1_000L, db.folderLastModified(FolderKind.PLAYLISTS, FolderKind.PLAYLISTS_ID))
 
-        db.apply(update(playlists = listOf(p.copy(changed = "v2", trackIds = listOf("t1")))))
+        db.apply(update(playlists = listOf(p.copy(changed = "v2", trackIds = listOf("t1"))), at = 2_000))
         assertEquals(listOf("t1"), db.playlistTrackIds("p1"))
+        assertEquals(2_000L, db.folderLastModified(FolderKind.PLAYLISTS, FolderKind.PLAYLISTS_ID))
 
-        db.apply(update(deletedPlaylists = setOf("p1")))
+        db.apply(update(deletedPlaylists = setOf("p1"), at = 3_000))
         assertEquals(emptyList<String>(), db.playlistTrackIds("p1"))
         assertEquals(0, db.counts().playlists)
     }
@@ -107,6 +181,7 @@ class LibraryDatabaseTest {
         db.wipe()
         assertEquals(LibraryCounts(0, 0, 0, 0), db.counts())
         assertNull(db.identity())
+        assertNull(album("A"))
         assertEquals(0L, db.libraryVersion())
     }
 }

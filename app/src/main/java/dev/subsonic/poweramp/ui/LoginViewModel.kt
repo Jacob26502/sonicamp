@@ -68,8 +68,18 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { app.credentialStore.load() } ?: return@launch
+            val (saved, libraryEmpty) = withContext(Dispatchers.IO) {
+                app.credentialStore.load() to (app.libraryDatabase.identity() == null)
+            }
+            if (saved == null) return@launch
             _state.update { it.copy(form = saved.toForm(), saved = true) }
+            // A server is configured but there's no synced library: the database was rebuilt after an
+            // app update changed its format, or a first sync never finished. Sync now rather than wait.
+            if (libraryEmpty) {
+                val settings = app.syncSettings.settings.value
+                SyncWorker.schedule(app, settings)
+                SyncWorker.syncNow(app, settings)
+            }
         }
     }
 

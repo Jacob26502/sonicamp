@@ -11,11 +11,28 @@ import dev.subsonic.poweramp.sync.TrackRecord
 
 data class LibraryCounts(val tracks: Int, val albums: Int, val artists: Int, val playlists: Int)
 
+/** Kinds of folder whose last-modified time is tracked in the `folders` table. */
+object FolderKind {
+    const val LIBRARY = "library"
+    /** id is "<libraryId>:<albumArtistId>": the same artist can appear in several libraries. */
+    const val ARTIST = "artist"
+    const val ALBUM = "album"
+    /** Single row, id [PLAYLISTS_ID]. */
+    const val PLAYLISTS = "playlists"
+    const val PLAYLISTS_ID = "all"
+
+    fun artistId(libraryId: Int, albumArtistId: String) = "$libraryId:$albumArtistId"
+}
+
 /**
  * Local copy of the server's library. It's a cache: a schema change simply drops everything and the
  * next sync refills it. Albums and artists are views over `tracks`, so they can't drift out of sync.
  *
- * WAL mode lets the Poweramp provider (phase 3) read while a sync is writing.
+ * Folder timestamps: Poweramp only re-reads folders whose last-modified time changed. A folder's
+ * newest track isn't enough (removing a track wouldn't change it), so every change bumps the
+ * `folders` row of the album, album artist and library it touched, before and after the change.
+ *
+ * WAL mode lets the Poweramp provider read while a sync is writing.
  *
  * @param name null for an in-memory database (tests).
  */
@@ -35,8 +52,8 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = recreate(db)
 
     private fun recreate(db: SQLiteDatabase) {
-        listOf("albums", "artists").forEach { db.execSQL("DROP VIEW IF EXISTS $it") }
-        listOf("playlist_entries", "playlists", "tracks", "libraries", "meta").forEach { db.execSQL("DROP TABLE IF EXISTS $it") }
+        listOf("artists", "albums").forEach { db.execSQL("DROP VIEW IF EXISTS $it") }
+        TABLES.forEach { db.execSQL("DROP TABLE IF EXISTS $it") }
         onCreate(db)
     }
 
@@ -63,28 +80,43 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
         }
 
         val tracks = update.tracks
-        (tracks.inserted + tracks.updated).forEach {
-            db.insertWithOnConflict("tracks", null, it.toValues(update.syncedAt), SQLiteDatabase.CONFLICT_REPLACE)
-        }
-        db.compileStatement("DELETE FROM tracks WHERE id = ?").use { stmt ->
-            tracks.deletedIds.forEach { stmt.bindString(1, it); stmt.executeUpdateDelete() }
+        val touched = TouchedFolders()
+        if (!tracks.isEmpty) {
+            // Where the changed tracks were before the change (album, album artist, library)...
+            touched.addFromTracks(db, tracks.updated.map { it.id } + tracks.deletedIds)
+            val newRows = tracks.inserted + tracks.updated
+            newRows.forEach { touched.add(it) }
+            touched.addAlbumParents(db)
+
+            newRows.forEach {
+                db.insertWithOnConflict("tracks", null, it.toValues(update.syncedAt), SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            db.compileStatement("DELETE FROM tracks WHERE id = ?").use { stmt ->
+                tracks.deletedIds.forEach { stmt.bindString(1, it); stmt.executeUpdateDelete() }
+            }
+
+            // ...and where they are now: an album's artist can change when its tracks change.
+            touched.addAlbumParents(db)
+            touched.bump(db, update.syncedAt)
+            pruneFolders(db)
         }
 
         val playlists = update.playlists
         playlists.deletedIds.forEach { deletePlaylist(db, it) }
         playlists.upserts.forEach { upsertPlaylist(db, it, update.syncedAt) }
+        if (!playlists.isEmpty) bumpFolder(db, FolderKind.PLAYLISTS, FolderKind.PLAYLISTS_ID, update.syncedAt)
 
         if (!tracks.isEmpty || !playlists.isEmpty) {
-            // Phase 3 compares this to decide whether Poweramp needs to rescan.
+            // Compared later to decide whether Poweramp needs to rescan.
             setMeta(db, KEY_LIBRARY_VERSION, ((meta(db, KEY_LIBRARY_VERSION)?.toLong() ?: 0) + 1).toString())
         }
     }
 
     override fun wipe() = transaction { db ->
-        listOf("playlist_entries", "playlists", "tracks", "libraries", "meta").forEach { db.delete(it, null, null) }
+        TABLES.forEach { db.delete(it, null, null) }
     }
 
-    // ---- Queries for the UI (and later the provider) ----
+    // ---- Queries for the UI and the provider ----
 
     fun counts(): LibraryCounts = readableDatabase.rawQuery(
         "SELECT (SELECT COUNT(*) FROM tracks), (SELECT COUNT(*) FROM albums), " +
@@ -98,12 +130,80 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
     /** Increments whenever a sync changes anything. */
     fun libraryVersion(): Long = meta(readableDatabase, KEY_LIBRARY_VERSION)?.toLong() ?: 0
 
+    /** Last time anything inside this folder changed, or null if it has never been bumped. */
+    fun folderLastModified(kind: String, id: String): Long? =
+        readableDatabase.rawQuery("SELECT last_modified FROM folders WHERE kind = ? AND id = ?", arrayOf(kind, id))
+            .use { if (it.moveToFirst()) it.getLong(0) else null }
+
     /** Track ids of a playlist in order. */
     fun playlistTrackIds(playlistId: String): List<String> =
         readableDatabase.rawQuery(
             "SELECT track_id FROM playlist_entries WHERE playlist_id = ? ORDER BY position",
             arrayOf(playlistId),
         ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+
+    // ---- folder timestamps ----
+
+    /** Collects the folders affected by one sync. */
+    private class TouchedFolders {
+        val libraries = HashSet<Int>()
+        val albums = HashSet<String>()
+        val artists = HashSet<String>()
+
+        fun add(t: TrackRecord) {
+            libraries += t.libraryId
+            t.albumId?.let { albums += it }
+            t.albumArtistId?.let { artists += FolderKind.artistId(t.libraryId, it) }
+        }
+
+        /** Folders of the stored versions of these tracks (before they are replaced/deleted). */
+        fun addFromTracks(db: SQLiteDatabase, trackIds: Collection<String>) {
+            trackIds.chunked(CHUNK).forEach { chunk ->
+                db.rawQuery(
+                    "SELECT library_id, album_id, album_artist_id FROM tracks WHERE id IN (${placeholders(chunk.size)})",
+                    chunk.toTypedArray(),
+                ).use { c ->
+                    while (c.moveToNext()) {
+                        libraries += c.getInt(0)
+                        if (!c.isNull(1)) albums += c.getString(1)
+                        if (!c.isNull(2)) artists += FolderKind.artistId(c.getInt(0), c.getString(2))
+                    }
+                }
+            }
+        }
+
+        /** The artist folder each touched album currently lives in (album-level artist, see the albums view). */
+        fun addAlbumParents(db: SQLiteDatabase) {
+            albums.toList().chunked(CHUNK).forEach { chunk ->
+                db.rawQuery(
+                    "SELECT library_id, album_artist_id FROM albums WHERE id IN (${placeholders(chunk.size)})",
+                    chunk.toTypedArray(),
+                ).use { c ->
+                    while (c.moveToNext()) {
+                        libraries += c.getInt(0)
+                        if (!c.isNull(1)) artists += FolderKind.artistId(c.getInt(0), c.getString(1))
+                    }
+                }
+            }
+        }
+
+        fun bump(db: SQLiteDatabase, at: Long) {
+            libraries.forEach { bumpFolder(db, FolderKind.LIBRARY, it.toString(), at) }
+            artists.forEach { bumpFolder(db, FolderKind.ARTIST, it, at) }
+            albums.forEach { bumpFolder(db, FolderKind.ALBUM, it, at) }
+        }
+
+        private fun placeholders(n: Int) = List(n) { "?" }.joinToString(",")
+    }
+
+    /** Drops timestamps of albums/artists that no longer exist. */
+    private fun pruneFolders(db: SQLiteDatabase) {
+        db.execSQL("DELETE FROM folders WHERE kind = '${FolderKind.ALBUM}' AND id NOT IN (SELECT id FROM albums)")
+        db.execSQL(
+            "DELETE FROM folders WHERE kind = '${FolderKind.ARTIST}' AND " +
+                "id NOT IN (SELECT library_id || ':' || id FROM artists)"
+        )
+    }
 
     // ---- helpers ----
 
@@ -144,6 +244,7 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
         put("artist", artist)
         put("album_artist_id", albumArtistId)
         put("album_artist", albumArtist)
+        put("composer", composer)
         put("track_no", trackNo)
         put("disc_no", discNo)
         put("year", year)
@@ -153,6 +254,9 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
         put("suffix", suffix)
         put("content_type", contentType)
         put("bit_rate", bitRate)
+        put("sample_rate", sampleRate)
+        put("bit_depth", bitDepth)
+        put("channels", channels)
         put("cover_art", coverArt)
         put("path", path)
         put("created", created)
@@ -179,9 +283,21 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
     }
 
     private companion object {
-        const val VERSION = 1
+        /** 2: composer/audio format columns, folders table, album cover. */
+        const val VERSION = 2
         const val KEY_IDENTITY = "identity"
         const val KEY_LIBRARY_VERSION = "library_version"
+        const val CHUNK = 500 // stays under SQLite's bound-parameter limit
+
+        val TABLES = listOf("playlist_entries", "playlists", "folders", "tracks", "libraries", "meta")
+
+        fun bumpFolder(db: SQLiteDatabase, kind: String, id: String, at: Long) {
+            db.insertWithOnConflict(
+                "folders", null,
+                ContentValues().apply { put("kind", kind); put("id", id); put("last_modified", at) },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        }
 
         val SCHEMA = listOf(
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -195,6 +311,7 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
                 artist TEXT,
                 album_artist_id TEXT,
                 album_artist TEXT,
+                composer TEXT,
                 track_no INTEGER,
                 disc_no INTEGER,
                 year INTEGER,
@@ -204,6 +321,9 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
                 suffix TEXT,
                 content_type TEXT,
                 bit_rate INTEGER,
+                sample_rate INTEGER,
+                bit_depth INTEGER,
+                channels INTEGER,
                 cover_art TEXT,
                 path TEXT,
                 created TEXT,
@@ -212,6 +332,12 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
             )""",
             "CREATE INDEX tracks_by_album ON tracks (album_id)",
             "CREATE INDEX tracks_by_album_artist ON tracks (library_id, album_artist_id)",
+            """CREATE TABLE folders (
+                kind TEXT NOT NULL,
+                id TEXT NOT NULL,
+                last_modified INTEGER NOT NULL,
+                PRIMARY KEY (kind, id)
+            )""",
             """CREATE TABLE playlists (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -229,15 +355,28 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
                 track_id TEXT NOT NULL,
                 PRIMARY KEY (playlist_id, position)
             )""",
+            // An album lives in exactly one artist folder: its album-level artist, so an album whose
+            // tracks list different artists isn't split. Its cover is any of its tracks' covers.
             """CREATE VIEW albums AS
-                SELECT album_id AS id, library_id, MIN(album) AS name,
-                       MIN(album_artist_id) AS album_artist_id, MIN(album_artist) AS album_artist,
-                       MAX(year) AS year, COUNT(*) AS track_count, MAX(last_modified) AS last_modified
-                FROM tracks WHERE album_id IS NOT NULL GROUP BY album_id""",
+                SELECT a.id, a.library_id, a.name, a.album_artist_id, a.album_artist, a.year, a.track_count,
+                       a.cover_art, COALESCE(f.last_modified, a.tracks_modified) AS last_modified
+                FROM (
+                    SELECT album_id AS id, MIN(library_id) AS library_id, MIN(album) AS name,
+                           MIN(album_artist_id) AS album_artist_id, MIN(album_artist) AS album_artist,
+                           MAX(year) AS year, COUNT(*) AS track_count, MIN(cover_art) AS cover_art,
+                           MAX(last_modified) AS tracks_modified
+                    FROM tracks WHERE album_id IS NOT NULL GROUP BY album_id
+                ) a
+                LEFT JOIN folders f ON f.kind = 'album' AND f.id = a.id""",
             """CREATE VIEW artists AS
-                SELECT album_artist_id AS id, library_id, MIN(album_artist) AS name,
-                       COUNT(DISTINCT album_id) AS album_count, MAX(last_modified) AS last_modified
-                FROM tracks WHERE album_artist_id IS NOT NULL GROUP BY library_id, album_artist_id""",
+                SELECT r.id, r.library_id, r.name, r.album_count,
+                       COALESCE(f.last_modified, r.albums_modified) AS last_modified
+                FROM (
+                    SELECT album_artist_id AS id, library_id, MIN(album_artist) AS name,
+                           COUNT(*) AS album_count, MAX(last_modified) AS albums_modified
+                    FROM albums WHERE album_artist_id IS NOT NULL GROUP BY library_id, album_artist_id
+                ) r
+                LEFT JOIN folders f ON f.kind = 'artist' AND f.id = r.library_id || ':' || r.id""",
         )
     }
 }
