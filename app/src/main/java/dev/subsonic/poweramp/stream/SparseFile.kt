@@ -24,8 +24,9 @@ class SparseFile(val data: File, val size: Long) : Closeable {
     private fun loadRanges(): RangeSet {
         if (!rangesFile.exists() || raf.length() == 0L) return RangeSet()
         return try {
-            val flat = rangesFile.readText().split(',').filter { it.isNotBlank() }.map { it.trim().toLong() }
-            val set = RangeSet.fromList(flat)
+            val record = readRecord(rangesFile, legacySize = size) ?: return RangeSet()
+            if (record.size != size) return RangeSet()
+            val set = record.ranges
             // Never trust ranges beyond what's actually on disk (e.g. after a crash mid-write).
             if (set.toList().all { it <= raf.length() && it <= size }) set else RangeSet()
         } catch (e: Exception) {
@@ -68,7 +69,7 @@ class SparseFile(val data: File, val size: Long) : Closeable {
     fun saveRanges() {
         try {
             val tmp = File(rangesFile.path + ".tmp")
-            tmp.writeText(ranges.toList().joinToString(","))
+            tmp.writeText("$size\n" + ranges.toList().joinToString(","))
             if (!tmp.renameTo(rangesFile)) tmp.delete()
         } catch (_: Exception) {
         }
@@ -80,7 +81,28 @@ class SparseFile(val data: File, val size: Long) : Closeable {
         raf.close()
     }
 
+    /** Contents of a ".ranges" file: the full file size, then the downloaded ranges. */
+    class Record(val size: Long, val ranges: RangeSet) {
+        val isComplete get() = ranges.coveredEnd(0) >= size
+    }
+
     companion object {
         const val RANGES_SUFFIX = ".ranges"
+
+        /**
+         * @param legacySize the size to assume for records written before the size was stored (a
+         *   single line of ranges); without it such records are unreadable.
+         */
+        fun readRecord(rangesFile: File, legacySize: Long? = null): Record? = try {
+            val lines = rangesFile.readText().lines()
+            fun parse(line: String?) = line.orEmpty().split(',').filter { it.isNotBlank() }.map { it.trim().toLong() }
+            if (lines.size == 1 && lines[0].contains(',')) {
+                legacySize?.let { Record(it, RangeSet.fromList(parse(lines[0]))) }
+            } else {
+                Record(lines[0].trim().toLong(), RangeSet.fromList(parse(lines.getOrNull(1))))
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 }

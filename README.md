@@ -11,7 +11,7 @@ An Android app that makes a Subsonic / OpenSubsonic server (developed against **
 | 2 | Local library database, scheduled sync | done |
 | 3 | Poweramp track provider (browse + stream) | done |
 | 4 | Lyrics, playlists in Poweramp, scrobbling | done |
-| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | 5a–5b done (streaming, cache); 5c settings/offline, 5d transcoding next |
+| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | 5a–5c done (streaming, cache, cache settings); 5d transcoding next |
 
 Phases 3–4 handed tracks to Poweramp as stream URLs. On Poweramp build 1035 that broke seeking,
 showed tracks as an empty "Stream" in Info/Tags with the login token in the URL, and stopped playlist
@@ -53,9 +53,11 @@ of these (tested on device).
   peeks near the end, the first read after a seek) fetch one 256 KB block, and the download follows
   if playback continues there. Dropped connections are retried; a read gives up after 20 s rather
   than hanging Poweramp. Opening needs no network: the size comes from the library.
-- **Audio cache:** played tracks stay in `cache/audio` (which byte ranges are present is stored
-  beside each file), so replays and fully downloaded tracks play without the server. Capped at 2 GB,
-  least recently used first.
+- **Audio cache:** played tracks stay in `cache/audio` (the file size and which byte ranges are
+  present are stored beside each file), so replays and fully downloaded tracks play without the
+  server. The app shows usage and fully downloaded tracks, has a size limit (1/2/5/10 GB, default 2,
+  least recently used removed first, never the track playing), "Clear cache", and an option to
+  download whole tracks on mobile data too.
 - **Playlists:** server playlists appear as `.m3u8` files in a "Playlists" folder in the first
   library's root. Entries are Poweramp's own path for each track,
   `@dev.subsonic.poweramp.provider/lib%3A1/track%3A<id>`: probing on device showed Poweramp keeps

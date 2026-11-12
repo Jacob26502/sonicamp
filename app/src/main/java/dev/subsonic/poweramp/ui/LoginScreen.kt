@@ -47,6 +47,7 @@ fun LoginRoute(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val library by libraryViewModel.state.collectAsStateWithLifecycle()
+    val cache by libraryViewModel.cache.collectAsStateWithLifecycle()
 
     // Ask once for notification permission (Android 13+) when saving, so a rejected login
     // during a background sync can be reported. Saving goes ahead whatever the answer.
@@ -75,6 +76,10 @@ fun LoginRoute(
                     onWifiOnlyChange = libraryViewModel::setWifiOnly,
                     onAskPowerampRescan = libraryViewModel::askPowerampToRescan,
                     onScrobbleChange = libraryViewModel::setScrobbleEnabled,
+                    cache = cache,
+                    onCacheMaxGbChange = libraryViewModel::setCacheMaxGb,
+                    onWholeTracksOnMobileChange = libraryViewModel::setWholeTracksOnMobile,
+                    onClearCache = libraryViewModel::clearCache,
                     onForget = viewModel::forgetServer,
                 )
             }

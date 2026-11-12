@@ -190,6 +190,7 @@ class StreamSession(
             val input = body.byteStream()
             val buf = ByteArray(CHUNK)
             var pos = start
+            var savedAt = start
             while (pos < end) {
                 val n = input.read(buf, 0, minOf(CHUNK.toLong(), end - pos).toInt())
                 if (n < 0) {
@@ -198,6 +199,11 @@ class StreamSession(
                 }
                 file.write(pos, buf, 0, n)
                 pos += n
+                // Keep the on-disk record current: the cache screen reads it, and a crash keeps progress.
+                if (pos - savedAt >= SAVE_EVERY || pos >= end) {
+                    file.saveRanges()
+                    savedAt = pos
+                }
                 lock.withLock {
                     if (Thread.currentThread() === thread) dlPos = pos
                     changed.signalAll()
@@ -229,6 +235,7 @@ class StreamSession(
         const val CHUNK = 64 * 1024
         const val MAX_FAILURES = 4
         const val BLOCK_ATTEMPTS = 3
+        const val SAVE_EVERY = 4L * 1024 * 1024
         const val BACKOFF_MS = 1_000L
     }
 }

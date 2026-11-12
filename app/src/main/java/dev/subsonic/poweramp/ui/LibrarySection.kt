@@ -28,7 +28,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.subsonic.poweramp.stream.CacheSettings
 import dev.subsonic.poweramp.sync.SyncSettings
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
+    bytes >= 1024L * 1024 -> "%.0f MB".format(bytes / (1024.0 * 1024))
+    else -> "${bytes / 1024} KB"
+}
 
 @Composable
 fun LibrarySection(
@@ -38,6 +45,10 @@ fun LibrarySection(
     onWifiOnlyChange: (Boolean) -> Unit,
     onAskPowerampRescan: () -> Unit,
     onScrobbleChange: (Boolean) -> Unit,
+    cache: CacheUiState,
+    onCacheMaxGbChange: (Int) -> Unit,
+    onWholeTracksOnMobileChange: (Boolean) -> Unit,
+    onClearCache: () -> Unit,
     onForget: () -> Unit,
 ) {
     var confirmForget by remember { mutableStateOf(false) }
@@ -136,6 +147,44 @@ fun LibrarySection(
         Spacer(Modifier.size(8.dp))
         Switch(checked = state.scrobbleEnabled, onCheckedChange = onScrobbleChange)
     }
+
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    Text("Offline cache", style = MaterialTheme.typography.headlineSmall)
+    Text(
+        "Tracks you play are kept on this phone, so replays and fully downloaded tracks play without " +
+            "the server. Oldest are removed first when the cache is full.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    cache.stats?.let { s ->
+        Text(
+            "${formatBytes(s.bytes)} used · ${s.completeTracks} of ${s.tracks} tracks fully downloaded",
+            style = MaterialTheme.typography.titleSmall,
+        )
+    }
+    Text("Cache size", style = MaterialTheme.typography.bodyMedium)
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        val choices = CacheSettings.MAX_GB_CHOICES
+        choices.forEachIndexed { index, gb ->
+            SegmentedButton(
+                selected = cache.settings.maxGb == gb,
+                onClick = { onCacheMaxGbChange(gb) },
+                shape = SegmentedButtonDefaults.itemShape(index, choices.size),
+            ) { Text("$gb GB") }
+        }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Download whole tracks on mobile data", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Off: on mobile data only the next 8 MB or so is downloaded ahead, so skipped tracks cost little. " +
+                    "On Wi-Fi whole tracks are always downloaded.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        Switch(checked = cache.settings.wholeTracksOnMobile, onCheckedChange = onWholeTracksOnMobileChange)
+    }
+    TextButton(onClick = onClearCache) { Text("Clear cache") }
 
     TextButton(onClick = { confirmForget = true }) {
         Text("Forget server", color = MaterialTheme.colorScheme.error)

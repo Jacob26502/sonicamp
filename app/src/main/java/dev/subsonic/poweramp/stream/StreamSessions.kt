@@ -20,6 +20,7 @@ class StreamSessions(
     private val context: Context,
     private val http: OkHttpClient,
     val cache: AudioCache,
+    private val settings: () -> CacheSettings,
 ) {
     private class Entry(val session: StreamSession, val file: File) {
         var refs = 0
@@ -74,6 +75,12 @@ class StreamSessions(
     @Synchronized
     fun inUse(): Set<File> = sessions.values.map { it.file }.toSet()
 
+    /** Applies a lower size limit now rather than after the next track. */
+    fun trimCache() = cache.trim(inUse())
+
+    /** Deletes everything not currently playing. */
+    fun clearCache() = cache.clear(inUse())
+
     @Volatile private var readAheadValue = METERED_READ_AHEAD
     @Volatile private var readAheadCheckedAt = 0L
 
@@ -85,7 +92,8 @@ class StreamSessions(
         val now = System.currentTimeMillis()
         if (now - readAheadCheckedAt > 5_000) {
             val cm = context.getSystemService(ConnectivityManager::class.java)
-            readAheadValue = if (cm?.isActiveNetworkMetered == false) Long.MAX_VALUE else METERED_READ_AHEAD
+            val unmetered = cm?.isActiveNetworkMetered == false
+            readAheadValue = if (unmetered || settings().wholeTracksOnMobile) Long.MAX_VALUE else METERED_READ_AHEAD
             readAheadCheckedAt = now
         }
         return readAheadValue

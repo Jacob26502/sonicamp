@@ -8,7 +8,12 @@ import dev.subsonic.poweramp.library.LibraryCounts
 import dev.subsonic.poweramp.sync.SyncSettings
 import dev.subsonic.poweramp.sync.SyncStatus
 import dev.subsonic.poweramp.sync.SyncWorker
+import dev.subsonic.poweramp.stream.AudioCache
+import dev.subsonic.poweramp.stream.CacheSettings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +32,8 @@ data class LibraryUiState(
     val powerampRescanPending: Boolean = false,
     val scrobbleEnabled: Boolean = true,
 )
+
+data class CacheUiState(val settings: CacheSettings, val stats: AudioCache.Stats?)
 
 class LibraryViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -58,6 +65,35 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
     fun setScrobbleEnabled(enabled: Boolean) = app.scrobbler.setEnabled(enabled)
+
+    private val cacheRefresh = MutableStateFlow(0)
+
+    /** Re-read every few seconds while shown: the cache fills as Poweramp plays. */
+    private val cacheStats = combine(
+        cacheRefresh,
+        flow { while (true) { emit(Unit); delay(5_000) } },
+    ) { _, _ -> app.audioCache.stats() }.flowOn(Dispatchers.IO)
+
+    val cache: StateFlow<CacheUiState> = combine(app.cacheSettings.settings, cacheStats) { settings, stats ->
+        CacheUiState(settings, stats)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CacheUiState(app.cacheSettings.settings.value, null))
+
+    fun setCacheMaxGb(gb: Int) {
+        app.cacheSettings.update { it.copy(maxGb = gb) }
+        viewModelScope.launch(Dispatchers.IO) {
+            app.streamSessions.trimCache()
+            cacheRefresh.update { it + 1 }
+        }
+    }
+
+    fun setWholeTracksOnMobile(enabled: Boolean) = app.cacheSettings.update { it.copy(wholeTracksOnMobile = enabled) }
+
+    fun clearCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            app.streamSessions.clearCache()
+            cacheRefresh.update { it + 1 }
+        }
+    }
 
     fun syncNow() = SyncWorker.syncNow(app, app.syncSettings.settings.value)
 
