@@ -1,5 +1,12 @@
 package dev.subsonic.poweramp.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,13 +41,42 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.subsonic.poweramp.subsonic.ServerInfo
 
 @Composable
-fun LoginRoute(viewModel: LoginViewModel = viewModel()) {
+fun LoginRoute(
+    viewModel: LoginViewModel = viewModel(),
+    libraryViewModel: LibraryViewModel = viewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val library by libraryViewModel.state.collectAsStateWithLifecycle()
+
+    // Ask once for notification permission (Android 13+) when saving, so a rejected login
+    // during a background sync can be reported. Saving goes ahead whatever the answer.
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val context = LocalContext.current
+    val onSave = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        viewModel.save()
+    }
+
     LoginScreen(
         state = state,
         onEdit = viewModel::edit,
         onTest = viewModel::testConnection,
-        onSave = viewModel::save,
+        onSave = onSave,
+        librarySection = {
+            if (library.configured) {
+                LibrarySection(
+                    state = library,
+                    onSyncNow = libraryViewModel::syncNow,
+                    onIntervalChange = libraryViewModel::setInterval,
+                    onWifiOnlyChange = libraryViewModel::setWifiOnly,
+                    onForget = viewModel::forgetServer,
+                )
+            }
+        },
     )
 }
 
@@ -50,6 +86,7 @@ fun LoginScreen(
     onEdit: ((LoginForm) -> LoginForm) -> Unit,
     onTest: () -> Unit,
     onSave: () -> Unit,
+    librarySection: @Composable () -> Unit = {},
 ) {
     val form = state.form
     Scaffold { padding ->
@@ -148,6 +185,8 @@ fun LoginScreen(
                 is TestResult.Failure -> ErrorCard(result.message)
                 null -> Unit
             }
+
+            librarySection()
         }
     }
 }

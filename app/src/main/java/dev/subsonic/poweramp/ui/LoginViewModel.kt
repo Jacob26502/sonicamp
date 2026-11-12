@@ -9,6 +9,8 @@ import dev.subsonic.poweramp.subsonic.ConnectionTester
 import dev.subsonic.poweramp.subsonic.ServerInfo
 import dev.subsonic.poweramp.subsonic.ServerUrl
 import dev.subsonic.poweramp.subsonic.SubsonicAuth
+import dev.subsonic.poweramp.sync.SyncNotifications
+import dev.subsonic.poweramp.sync.SyncWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,7 +32,7 @@ data class LoginForm(
 )
 
 sealed interface TestResult {
-    /** [server] and [auth] are exactly what was tested, so Save stores what actually worked. */
+    /** [server] is exactly what was tested, so Save stores what actually worked. */
     data class Success(val info: ServerInfo, val server: SavedServer) : TestResult
     data class Failure(val message: String) : TestResult
 }
@@ -96,11 +98,32 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Saves the tested server and starts syncing. A different server/account replaces the old library. */
     fun save() {
         val success = _state.value.result as? TestResult.Success ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) { app.credentialStore.save(success.server) }
+            app.syncStatus.clearAuthFailure()
+            SyncNotifications.cancelAuthFailed(app)
+            val settings = app.syncSettings.settings.value
+            SyncWorker.schedule(app, settings)
+            SyncWorker.syncNow(app, settings)
             _state.update { it.copy(saved = true) }
+        }
+    }
+
+    /** Removes the server, its credentials, the synced library and all scheduled syncs. */
+    fun forgetServer() {
+        testJob?.cancel()
+        viewModelScope.launch {
+            SyncWorker.cancelAll(app)
+            withContext(Dispatchers.IO) {
+                app.credentialStore.clear()
+                app.libraryDatabase.wipe()
+            }
+            app.syncStatus.clear()
+            SyncNotifications.cancelAuthFailed(app)
+            _state.value = LoginUiState()
         }
     }
 

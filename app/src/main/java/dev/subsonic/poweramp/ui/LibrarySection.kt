@@ -1,0 +1,124 @@
+package dev.subsonic.poweramp.ui
+
+import android.text.format.DateUtils
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import dev.subsonic.poweramp.sync.SyncSettings
+
+@Composable
+fun LibrarySection(
+    state: LibraryUiState,
+    onSyncNow: () -> Unit,
+    onIntervalChange: (Int) -> Unit,
+    onWifiOnlyChange: (Boolean) -> Unit,
+    onForget: () -> Unit,
+) {
+    var confirmForget by remember { mutableStateOf(false) }
+    val status = state.status
+
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    Text("Library", style = MaterialTheme.typography.headlineSmall)
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            state.counts?.let { c ->
+                Text(
+                    "${c.tracks} tracks · ${c.albums} albums · ${c.artists} artists · ${c.playlists} playlists",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            Text(
+                when {
+                    status.running -> "Syncing…"
+                    status.lastSuccessAt != null -> {
+                        val now = System.currentTimeMillis()
+                        if (now - status.lastSuccessAt < DateUtils.MINUTE_IN_MILLIS) "Last synced just now"
+                        else "Last synced " + DateUtils.getRelativeTimeSpanString(status.lastSuccessAt, now, DateUtils.MINUTE_IN_MILLIS)
+                    }
+                    else -> "Not synced yet"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            status.lastSummary?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            status.lastError?.let {
+                Text(
+                    (if (status.authFailed) "Sync paused: " else "Last sync failed: ") + it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = onSyncNow, enabled = !status.running) { Text("Sync now") }
+        if (status.running) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+    }
+
+    Text("Sync automatically every", style = MaterialTheme.typography.bodyMedium)
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        val choices = SyncSettings.INTERVAL_CHOICES
+        choices.forEachIndexed { index, hours ->
+            SegmentedButton(
+                selected = state.settings.intervalHours == hours,
+                onClick = { onIntervalChange(hours) },
+                shape = SegmentedButtonDefaults.itemShape(index, choices.size),
+            ) { Text("$hours h") }
+        }
+    }
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Only sync on Wi-Fi", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Sync downloads track information only, not music.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        Switch(checked = state.settings.wifiOnly, onCheckedChange = onWifiOnlyChange)
+    }
+
+    TextButton(onClick = { confirmForget = true }) {
+        Text("Forget server", color = MaterialTheme.colorScheme.error)
+    }
+
+    if (confirmForget) {
+        AlertDialog(
+            onDismissRequest = { confirmForget = false },
+            title = { Text("Forget this server?") },
+            text = { Text("This removes the saved login and the synced library from this device. Nothing on the server is changed.") },
+            confirmButton = {
+                TextButton(onClick = { confirmForget = false; onForget() }) {
+                    Text("Forget", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
+        )
+    }
+}

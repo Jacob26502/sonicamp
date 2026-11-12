@@ -5,13 +5,15 @@ import android.content.SharedPreferences
 import android.util.Log
 import dev.subsonic.poweramp.subsonic.ServerUrl
 import dev.subsonic.poweramp.subsonic.SubsonicAuth
-import okhttp3.HttpUrl
-
-data class SavedServer(val baseUrl: HttpUrl, val auth: SubsonicAuth)
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Persists the one configured server. The URL and username are stored as-is; the password or
  * API key is encrypted with [SecretCipher] before it touches disk.
+ *
+ * [server] reflects the saved server once [load] has run (it decrypts, so call it off the main thread).
  */
 class CredentialStore(
     context: Context,
@@ -20,8 +22,17 @@ class CredentialStore(
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    private val _server = MutableStateFlow<SavedServer?>(null)
+    val server: StateFlow<SavedServer?> = _server.asStateFlow()
+
     @Synchronized
     fun load(): SavedServer? {
+        val loaded = readFromPrefs()
+        _server.value = loaded
+        return loaded
+    }
+
+    private fun readFromPrefs(): SavedServer? {
         val url = prefs.getString(KEY_URL, null) ?: return null
         val secretEnc = prefs.getString(KEY_SECRET, null) ?: return null
         return try {
@@ -36,7 +47,7 @@ class CredentialStore(
         } catch (e: Exception) {
             // Keystore key lost (e.g. device restore or lock-screen reset): the secret is unrecoverable.
             Log.w(TAG, "Saved credentials unreadable; clearing", e)
-            clear()
+            prefs.edit().clear().apply()
             null
         }
     }
@@ -55,11 +66,13 @@ class CredentialStore(
                 .putString(KEY_SECRET, cipher.encrypt(auth.key))
         }
         editor.apply()
+        _server.value = server
     }
 
     @Synchronized
     fun clear() {
         prefs.edit().clear().apply()
+        _server.value = null
     }
 
     private companion object {

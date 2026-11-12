@@ -26,6 +26,73 @@ data class OpenSubsonicExtension(
     val versions: List<Int> = emptyList(),
 )
 
+/** A library ("music folder"). Navidrome supports several, with per-user access. */
+@Serializable
+data class MusicFolder(
+    val id: Int,
+    val name: String? = null,
+)
+
+@Serializable
+data class ArtistRef(
+    val id: String? = null,
+    val name: String = "",
+)
+
+/**
+ * A song ("child") as returned by search3, getPlaylist, etc.
+ * [artists], [albumArtists], [displayArtist] and [displayAlbumArtist] are OpenSubsonic additions;
+ * classic Subsonic servers only send [artist]/[artistId].
+ */
+@Serializable
+data class Song(
+    val id: String,
+    val title: String = "",
+    val album: String? = null,
+    val albumId: String? = null,
+    val artist: String? = null,
+    val artistId: String? = null,
+    val track: Int? = null,
+    val discNumber: Int? = null,
+    val year: Int? = null,
+    val genre: String? = null,
+    val coverArt: String? = null,
+    val size: Long? = null,
+    val contentType: String? = null,
+    val suffix: String? = null,
+    val duration: Int? = null,
+    val bitRate: Int? = null,
+    val path: String? = null,
+    val created: String? = null,
+    val artists: List<ArtistRef> = emptyList(),
+    val albumArtists: List<ArtistRef> = emptyList(),
+    val displayArtist: String? = null,
+    val displayAlbumArtist: String? = null,
+)
+
+@Serializable
+data class Playlist(
+    val id: String,
+    val name: String = "",
+    val comment: String? = null,
+    val owner: String? = null,
+    val songCount: Int = 0,
+    val duration: Int = 0,
+    val created: String? = null,
+    /** Updated on every modification; used to skip re-fetching unchanged playlists. */
+    val changed: String? = null,
+    val coverArt: String? = null,
+    /** Only filled by getPlaylist. */
+    val entry: List<Song> = emptyList(),
+)
+
+@Serializable
+data class ScanStatus(
+    val scanning: Boolean = false,
+    val count: Long? = null,
+    val lastScan: String? = null,
+)
+
 /** What a successful connection test learned about the server. */
 data class ServerInfo(
     val type: String?,

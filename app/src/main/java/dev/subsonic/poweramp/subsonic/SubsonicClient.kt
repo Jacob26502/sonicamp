@@ -2,8 +2,12 @@ package dev.subsonic.poweramp.subsonic
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
@@ -25,16 +29,46 @@ class SubsonicClient(
 ) {
 
     /** Checks the credentials. Throws [SubsonicApiException] (e.g. code 40) if they're rejected. */
-    suspend fun ping(): BaseResponse = get("ping").let { json.decodeFromJsonElement(it) }
+    suspend fun ping(): BaseResponse = json.decodeFromJsonElement(get("ping"))
 
     /**
      * Lists OpenSubsonic extensions. The spec requires this endpoint to work without
      * authentication, so it can be called before the user has logged in.
      */
-    suspend fun openSubsonicExtensions(): List<OpenSubsonicExtension> {
-        val body = get("getOpenSubsonicExtensions", authenticated = false)
-        val list = body["openSubsonicExtensions"] ?: return emptyList()
-        return json.decodeFromJsonElement(list)
+    suspend fun openSubsonicExtensions(): List<OpenSubsonicExtension> =
+        decodeList(get("getOpenSubsonicExtensions", authenticated = false)["openSubsonicExtensions"], OpenSubsonicExtension.serializer())
+
+    suspend fun musicFolders(): List<MusicFolder> =
+        decodeList(get("getMusicFolders").obj("musicFolders")?.get("musicFolder"), MusicFolder.serializer())
+
+    /**
+     * One page of every song in the library (search3 with an empty query; supported by Navidrome).
+     * Pages are not a consistent snapshot if the library changes mid-sync, so callers should dedupe.
+     */
+    suspend fun allSongsPage(offset: Int, count: Int, musicFolderId: Int? = null): List<Song> {
+        val params = buildList {
+            add("query" to "")
+            add("artistCount" to "0")
+            add("albumCount" to "0")
+            add("songCount" to count.toString())
+            add("songOffset" to offset.toString())
+            musicFolderId?.let { add("musicFolderId" to it.toString()) }
+        }
+        return decodeList(get("search3", params).obj("searchResult3")?.get("song"), Song.serializer())
+    }
+
+    suspend fun playlists(): List<Playlist> =
+        decodeList(get("getPlaylists").obj("playlists")?.get("playlist"), Playlist.serializer())
+
+    suspend fun playlist(id: String): Playlist {
+        val element = get("getPlaylist", listOf("id" to id))["playlist"]
+            ?: throw UnexpectedResponseException("getPlaylist returned no playlist")
+        return json.decodeFromJsonElement(Playlist.serializer(), element)
+    }
+
+    suspend fun scanStatus(): ScanStatus {
+        val element = get("getScanStatus")["scanStatus"] ?: return ScanStatus()
+        return json.decodeFromJsonElement(ScanStatus.serializer(), element)
     }
 
     /** URL that streams a song. Contains credentials: treat it as a secret. */
@@ -82,22 +116,26 @@ class SubsonicClient(
         method: String,
         params: List<Pair<String, String>> = emptyList(),
         authenticated: Boolean = true,
-    ): JsonObject = withContext(Dispatchers.IO) {
+    ): JsonObject {
         val request = Request.Builder().url(endpoint(method, params, authenticated)).get().build()
-        http.newCall(request).execute().use { response ->
-            val text = response.body?.string().orEmpty()
-            // Some servers send Subsonic errors with HTTP 4xx, so try to parse the body first.
-            val payload = parseEnvelope(text)
-                ?: throw UnexpectedResponseException(
-                    if (response.isSuccessful) "The server didn't return a Subsonic response. Check the address."
-                    else "HTTP ${response.code} from server. Check the address."
-                )
-            val base: BaseResponse = json.decodeFromJsonElement(payload)
-            if (base.status != "ok") {
-                val err = base.error
-                throw SubsonicApiException(err?.code ?: SubsonicApiException.GENERIC, err?.message, err?.helpUrl)
+        // await() makes the request cancellable; body reading is blocking, so it runs on IO.
+        val response = http.newCall(request).await()
+        return withContext(Dispatchers.IO) {
+            response.use {
+                val text = it.body?.string().orEmpty()
+                // Some servers send Subsonic errors with HTTP 4xx, so try to parse the body first.
+                val payload = parseEnvelope(text)
+                    ?: throw UnexpectedResponseException(
+                        if (it.isSuccessful) "The server didn't return a Subsonic response. Check the address."
+                        else "HTTP ${it.code} from server. Check the address."
+                    )
+                val base: BaseResponse = json.decodeFromJsonElement(payload)
+                if (base.status != "ok") {
+                    val err = base.error
+                    throw SubsonicApiException(err?.code ?: SubsonicApiException.GENERIC, err?.message, err?.helpUrl)
+                }
+                payload
             }
-            payload
         }
     }
 
@@ -109,11 +147,28 @@ class SubsonicClient(
         null
     }
 
+    private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
+
+    /**
+     * Decodes a list that may be missing (empty result) or, on some servers' JSON output,
+     * a single object instead of a one-element array.
+     */
+    private fun <T> decodeList(element: JsonElement?, item: KSerializer<T>): List<T> = when (element) {
+        null -> emptyList()
+        is JsonArray -> json.decodeFromJsonElement(ListSerializer(item), element)
+        is JsonObject -> listOf(json.decodeFromJsonElement(item, element))
+        else -> emptyList()
+    }
+
     companion object {
         /** Highest classic Subsonic API version; also what Navidrome reports. */
         const val API_VERSION = "1.16.1"
         const val CLIENT_NAME = "SubsonicPoweramp"
 
+        /**
+         * isLenient stays on deliberately: some servers send IDs as JSON numbers, and strict mode
+         * refuses to read a number into a String field.
+         */
         internal val json = Json { ignoreUnknownKeys = true; isLenient = true }
     }
 }
