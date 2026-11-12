@@ -24,7 +24,7 @@ class SparseFile(val data: File, val size: Long) : Closeable {
     private fun loadRanges(): RangeSet {
         if (!rangesFile.exists() || raf.length() == 0L) return RangeSet()
         return try {
-            val record = readRecord(rangesFile, legacySize = size) ?: return RangeSet()
+            val record = readRecord(rangesFile) ?: return RangeSet()
             if (record.size != size) return RangeSet()
             val set = record.ranges
             // Never trust ranges beyond what's actually on disk (e.g. after a crash mid-write).
@@ -89,18 +89,11 @@ class SparseFile(val data: File, val size: Long) : Closeable {
     companion object {
         const val RANGES_SUFFIX = ".ranges"
 
-        /**
-         * @param legacySize the size to assume for records written before the size was stored (a
-         *   single line of ranges); without it such records are unreadable.
-         */
-        fun readRecord(rangesFile: File, legacySize: Long? = null): Record? = try {
+        /** Reads a record: the file size on the first line, then the ranges as comma-separated offsets. */
+        fun readRecord(rangesFile: File): Record? = try {
             val lines = rangesFile.readText().lines()
-            fun parse(line: String?) = line.orEmpty().split(',').filter { it.isNotBlank() }.map { it.trim().toLong() }
-            if (lines.size == 1 && lines[0].contains(',')) {
-                legacySize?.let { Record(it, RangeSet.fromList(parse(lines[0]))) }
-            } else {
-                Record(lines[0].trim().toLong(), RangeSet.fromList(parse(lines.getOrNull(1))))
-            }
+            val flat = lines.getOrNull(1).orEmpty().split(',').filter { it.isNotBlank() }.map { it.trim().toLong() }
+            Record(lines[0].trim().toLong(), RangeSet.fromList(flat))
         } catch (e: Exception) {
             null
         }

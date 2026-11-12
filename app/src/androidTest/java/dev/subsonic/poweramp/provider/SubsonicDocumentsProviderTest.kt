@@ -19,11 +19,9 @@ import dev.subsonic.poweramp.sync.PlaylistDiff
 import dev.subsonic.poweramp.sync.PlaylistRecord
 import dev.subsonic.poweramp.sync.TrackDiff
 import dev.subsonic.poweramp.sync.TrackRecord
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -116,8 +114,7 @@ class SubsonicDocumentsProviderTest {
         val artists = children("lib:1")
         assertEquals(listOf("Andora", "Kosaki"), artists.map { it[Document.COLUMN_DISPLAY_NAME] })
         assertTrue(artists.all { it[Document.COLUMN_MIME_TYPE] == Document.MIME_TYPE_DIR })
-        // Test data is older than the last presentation change, so that time is reported.
-        assertEquals(SubsonicDocumentsProvider.PRESENTATION_CHANGED_AT, artists[0][Document.COLUMN_LAST_MODIFIED])
+        assertEquals(1_000L, artists[0][Document.COLUMN_LAST_MODIFIED])
 
         // Poweramp asks for its custom __flags column explicitly; it's not in the default projection.
         val albums = children(
@@ -170,22 +167,6 @@ class SubsonicDocumentsProviderTest {
     }
 
     @Test
-    fun getUrlReturnsAFreshAuthenticatedStreamUrl() {
-        val uri = DocumentsContract.buildDocumentUri(authority, "track:d1t1")
-        val first = resolver.call(uri, TrackProviderConsts.CALL_GET_URL, uri.toString(), null)!!
-            .getString(TrackProviderConsts.COLUMN_URL)!!.toHttpUrl()
-        val second = resolver.call(uri, TrackProviderConsts.CALL_GET_URL, uri.toString(), null)!!
-            .getString(TrackProviderConsts.COLUMN_URL)!!.toHttpUrl()
-
-        assertEquals("/rest/stream.view", first.encodedPath)
-        assertEquals("d1t1", first.queryParameter("id"))
-        assertEquals("user", first.queryParameter("u"))
-        assertNotNull(first.queryParameter("t"))
-        assertFalse("salt must differ per playback", first.queryParameter("s") == second.queryParameter("s"))
-        assertNull(first.queryParameter("p"))
-    }
-
-    @Test
     fun treeUrisResolveChildrenAndAncestors() {
         // How Poweramp addresses documents after the user picks the root in Music Folders.
         val tree = DocumentsContract.buildTreeDocumentUri(authority, "lib:1")
@@ -222,7 +203,7 @@ class SubsonicDocumentsProviderTest {
         val root = children("lib:1")
         assertEquals("playlists", root.first()[Document.COLUMN_DOCUMENT_ID])
         assertEquals("Playlists", root.first()[Document.COLUMN_DISPLAY_NAME])
-        assertEquals(SubsonicDocumentsProvider.shown(5_000), root.first()[Document.COLUMN_LAST_MODIFIED])
+        assertEquals(5_000L, root.first()[Document.COLUMN_LAST_MODIFIED])
 
         val playlists = children("playlists")
         val pl = playlists.single()

@@ -3,20 +3,19 @@
 An Android app that makes a Subsonic / OpenSubsonic server (developed against **Navidrome**) appear in
 [Poweramp](https://powerampapp.com/) as a library, using Poweramp's track-provider API.
 
-## Status
+## Version 0.1.0
 
-| Phase | What | State |
-|---|---|---|
-| 1 | Subsonic client, login screen, encrypted credentials | done |
-| 2 | Local library database, scheduled sync | done |
-| 3 | Poweramp track provider (browse + stream) | done |
-| 4 | Lyrics, playlists in Poweramp, scrobbling | done |
-| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | done |
+The first baseline. Tested against Navidrome 0.64.2 and Poweramp build 1035.
 
-Phases 3–4 handed tracks to Poweramp as stream URLs. On Poweramp build 1035 that broke seeking,
-showed tracks as an empty "Stream" in Info/Tags with the login token in the URL, and stopped playlist
-entries from resolving. Phase 5 replaced URLs with files streamed through the app, which fixed all
-of these (tested on device).
+- Login with password (token auth) or API key; credentials encrypted on the device
+- Library synced on a schedule and shown in Poweramp as Library → Album artist → Album → Tracks
+- Tracks stream through the app as seekable files, with an offline cache
+- Optional MP3 transcoding per network type, with upgrades to original quality in the background
+- Lyrics (synced and plain), server playlists in Poweramp, scrobbling with an offline queue
+
+Why tracks are files and not stream URLs: Poweramp's URL tracks can't seek (it never asks the server
+for another position), show as an empty "Stream" in Info/Tags with the login token in the URL, and
+can't be matched by playlist entries.
 
 ## How it works
 
@@ -43,9 +42,9 @@ of these (tested on device).
   `getLyrics` on servers without it). Synced lyrics are converted to LRC. Answers, including "no
   lyrics", are cached on disk for 30 days (3 days for "none").
 - **File names:** built from the tags (`01. Title.flac`). Navidrome's `path` is normally made up
-  (`Artist/Album/01-01 - Title.flac`), so it's only a fallback for tracks without a title. When the
-  way existing data is presented changes, `PRESENTATION_CHANGED_AT` in the provider is raised so
-  Poweramp re-reads every folder.
+  (`Artist/Album/01-01 - Title.flac`), so it's only a fallback for tracks without a title. Poweramp
+  only re-reads folders whose last-modified time changed, so a future change to how existing tracks
+  are presented (names, columns) must also change those times, or users must rescan in full.
 - **Playback:** tracks are files to Poweramp. `openDocument` returns a seekable descriptor
   (`StorageManager.openProxyFileDescriptor`) whose reads are served from a cache file, filled from
   the server with byte-range requests. One background download per track reads ahead from the play

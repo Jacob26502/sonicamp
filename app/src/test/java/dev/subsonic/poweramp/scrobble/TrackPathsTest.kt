@@ -23,16 +23,10 @@ class TrackPathsTest {
     }
 
     @Test
-    fun `stream url of our server`() {
-        val prefix = "http://127.0.0.1:4533/rest/stream"
-        assertEquals("s9", TrackPaths.songId("$prefix.view?v=1&u=admin&t=x&s=y&id=s9", auth, prefix))
-        assertNull(TrackPaths.songId("http://other/rest/stream.view?id=s9", auth, prefix))
-    }
-
-    @Test
     fun `other sources are not ours`() {
         assertNull(TrackPaths.songId(null, auth))
         assertNull(TrackPaths.songId("/storage/emulated/0/Music/a.flac", auth))
+        assertNull(TrackPaths.songId("http://127.0.0.1:4533/rest/stream.view?id=s9", auth))
         assertNull(TrackPaths.songId("content://$auth/document/album%3Aabc", auth))
         assertNull(TrackPaths.songId("content://com.other/document/track%3Aabc", auth))
     }

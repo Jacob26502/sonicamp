@@ -50,11 +50,11 @@ import java.io.FileNotFoundException
 
 /**
  * Exposes the synced library to Poweramp (and any Storage Access Framework client) as
- * Library → Album artist → Album → Tracks. Everything is answered from the local database; only
- * playback URLs and cover art touch the network.
+ * Library → Album artist → Album → Tracks, plus a Playlists folder. Everything is answered from the
+ * local database; only audio, lyrics and cover art touch the network.
  *
- * Tracks are "dynamic URL" tracks: Poweramp asks [call] with [TrackProviderConsts.CALL_GET_URL]
- * when playback starts, so login tokens are minted fresh and never stored in Poweramp's database.
+ * Tracks are files to Poweramp: [openDocument] returns a seekable descriptor streamed from the server
+ * through the audio cache, so Poweramp never sees a URL or login token.
  *
  * Every entry point catches Throwable: an exception escaping a provider can take Poweramp down.
  */
@@ -236,7 +236,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? = guard(null) {
         when (method) {
-            TrackProviderConsts.CALL_GET_URL -> streamUrl(arg)
+
             TrackProviderConsts.CALL_RESCAN -> {
                 Log.i(TAG, "Poweramp is starting a scan (provider=${extras?.getString("provider")}, path=${extras?.getString("path")})")
                 app.powerampRescans.onPowerampScanStarting()
@@ -247,16 +247,6 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         }
     }
 
-    private fun streamUrl(arg: String?): Bundle? {
-        val docId = arg?.let { DocumentsContract.getDocumentId(Uri.parse(it)) } ?: return null
-        val track = DocId.parse(docId) as? DocId.Track ?: return null
-        val server = currentServer() ?: return null
-        Log.i(TAG, "Playback URL requested for ${track.trackId}") // never log the URL itself: it carries a token
-        return Bundle().apply {
-            // Fresh salt/token for every playback; original quality (transcoded streams can't seek).
-            putString(TrackProviderConsts.COLUMN_URL, client(server).streamUrl(track.trackId).toString())
-        }
-    }
 
     /** Lets Poweramp show the full Library/Artist/Album path even if the user picked a sub-folder. */
     private fun dirMetadata(arg: String?): Bundle {
@@ -278,7 +268,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             add(Document.COLUMN_DOCUMENT_ID, doc.encoded)
             add(Document.COLUMN_MIME_TYPE, Document.MIME_TYPE_DIR)
             add(Document.COLUMN_DISPLAY_NAME, cleanName(name))
-            add(Document.COLUMN_LAST_MODIFIED, shown(lastModified))
+            add(Document.COLUMN_LAST_MODIFIED, lastModified)
             add(Document.COLUMN_FLAGS, if (thumbnail) Document.FLAG_SUPPORTS_THUMBNAIL else 0)
             // Lets Poweramp's folder picker skip probing for sub-folders.
             add(TrackProviderConsts.COLUMN_FLAGS, subdirs)
@@ -298,7 +288,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             add(Document.COLUMN_DOCUMENT_ID, DocId.Playlist(p.id).encoded)
             add(Document.COLUMN_MIME_TYPE, PLAYLIST_MIME)
             add(Document.COLUMN_DISPLAY_NAME, cleanName(p.name) + DocId.PLAYLIST_EXT)
-            add(Document.COLUMN_LAST_MODIFIED, shown(p.lastModified))
+            add(Document.COLUMN_LAST_MODIFIED, p.lastModified)
             add(Document.COLUMN_FLAGS, 0)
         }
     }
@@ -312,7 +302,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             add(Document.COLUMN_DOCUMENT_ID, DocId.Track(t.id).encoded)
             add(Document.COLUMN_MIME_TYPE, t.contentType ?: t.suffix?.let { "audio/$it" } ?: "audio/*")
             add(Document.COLUMN_DISPLAY_NAME, displayName(t))
-            add(Document.COLUMN_LAST_MODIFIED, shown(t.lastModified))
+            add(Document.COLUMN_LAST_MODIFIED, t.lastModified)
             add(Document.COLUMN_SIZE, t.sizeBytes)
             add(Document.COLUMN_FLAGS, if (t.coverArt != null) Document.FLAG_SUPPORTS_THUMBNAIL else 0)
 
@@ -449,16 +439,6 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         private const val TAG = "SubsonicProvider"
         private const val MAX_DEPTH = 4
         private const val LYRICS_TIMEOUT_MS = 10_000L
-
-        /**
-         * When the provider last changed how it presents existing data (here: track file names built
-         * from tags, tracks as files instead of URLs, playlist entries by doc id, 2026-11-12). Poweramp
-         * only re-reads folders whose time changed, so no folder or track is reported as older than
-         * this. Raise it whenever names, playlist contents or columns change.
-         */
-        const val PRESENTATION_CHANGED_AT = 1_794_492_000_000L
-
-        fun shown(lastModified: Long) = maxOf(lastModified, PRESENTATION_CHANGED_AT)
         const val PLAYLISTS_FOLDER_NAME = "Playlists"
         private const val PLAYLIST_MIME = "audio/x-mpegurl"
 

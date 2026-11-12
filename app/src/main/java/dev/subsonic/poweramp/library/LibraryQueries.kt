@@ -149,13 +149,6 @@ fun LibraryDatabase.tracksWithoutAlbum(libraryId: Int): List<TrackRow> = query(
 fun LibraryDatabase.track(trackId: String): TrackRow? =
     query("$TRACK_SELECT WHERE id = ?", trackId, map = ::trackOf).firstOrNull()
 
-/** Just what's needed to work out a track's cache file names. */
-data class TrackSizeRow(val id: String, val sizeBytes: Long, val durationSec: Int?)
-
-fun LibraryDatabase.trackSizes(): List<TrackSizeRow> =
-    query("SELECT id, size_bytes, duration_sec FROM tracks WHERE size_bytes > 0") {
-        TrackSizeRow(it.getString(0), it.getLong(1), it.intOrNull(2))
-    }
 
 data class PlaylistRow(val id: String, val name: String, val songCount: Int, val lastModified: Long)
 

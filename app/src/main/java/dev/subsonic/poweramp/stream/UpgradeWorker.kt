@@ -11,7 +11,6 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dev.subsonic.poweramp.SubsonicApp
 import dev.subsonic.poweramp.library.track
-import dev.subsonic.poweramp.library.trackSizes
 import dev.subsonic.poweramp.subsonic.SubsonicClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,7 +31,6 @@ class UpgradeWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val sessions = app.streamSessions
         val client = SubsonicClient(server.baseUrl, server.auth, app.httpClient)
 
-        backfillMeta(app, server.identity)
         val trackIds = cache.entries()
             .filter { it.serverIdentity == server.identity && it.variant != StreamSessions.RAW }
             .map { it.trackId }
@@ -72,35 +70,6 @@ class UpgradeWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         }
         if (upgraded > 0) Log.i(TAG, "Upgraded $upgraded tracks to original quality")
         Result.success()
-    }
-
-    /**
-     * Cache files from before ".meta" records existed are named by a hash, so work out which track
-     * and variant each is by hashing every library track's possible names.
-     */
-    private fun backfillMeta(app: SubsonicApp, serverIdentity: String) {
-        val cache = app.audioCache
-        val known = cache.entries().map { it.file.name }.toSet()
-        val orphans = cache.dataFiles().filter { it.name !in known }.associateBy { it.name }
-        if (orphans.isEmpty()) return
-        var found = 0
-        for (t in app.libraryDatabase.trackSizes()) {
-            val candidates = buildList {
-                add(StreamSessions.RAW to t.sizeBytes)
-                t.durationSec?.takeIf { it > 0 }?.let { d ->
-                    CacheSettings.QUALITY_CHOICES.filter { it != CacheSettings.ORIGINAL }
-                        .forEach { kbps -> add("mp3-$kbps" to StreamSession.mp3Size(d, kbps)) }
-                }
-            }
-            for ((variant, size) in candidates) {
-                val file = cache.fileFor(serverIdentity, t.id, size, variant)
-                if (file.name in orphans) {
-                    cache.writeMeta(file, serverIdentity, t.id, variant, size)
-                    found++
-                }
-            }
-        }
-        Log.i(TAG, "Identified $found of ${orphans.size} older cache files")
     }
 
     companion object {

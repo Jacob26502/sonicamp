@@ -31,9 +31,7 @@ class AudioCache(private val dir: File, private val maxBytes: () -> Long) {
         }
     }
 
-    fun dataFiles(): List<File> = dir.listFiles { f -> f.name.endsWith(DATA_SUFFIX) }.orEmpty().toList()
-
-    /** Every cache file that has a record of what it holds (files from before records existed are skipped). */
+    /** Every cache file with a readable record of what it holds. */
     fun entries(): List<Entry> =
         dir.listFiles { f -> f.name.endsWith(DATA_SUFFIX) }.orEmpty().mapNotNull { f ->
             try {
@@ -90,9 +88,7 @@ class AudioCache(private val dir: File, private val maxBytes: () -> Long) {
      */
     fun stats(): Stats {
         val files = dir.listFiles { f -> f.name.endsWith(DATA_SUFFIX) } ?: return Stats(0, 0, 0)
-        // Older records lack the size; a file then is as long as its furthest downloaded byte, which
-        // for those (always downloaded to the end) is the track size.
-        val records = files.map { SparseFile.readRecord(File(it.path + SparseFile.RANGES_SUFFIX), legacySize = it.length()) }
+        val records = files.map { SparseFile.readRecord(File(it.path + SparseFile.RANGES_SUFFIX)) }
         return Stats(
             bytes = records.sumOf { it?.ranges?.coveredBytes ?: 0 },
             tracks = files.size,

@@ -75,8 +75,8 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (saved == null) return@launch
             _state.update { it.copy(form = saved.toForm(), saved = true) }
-            // A server is configured but there's no synced library: the database was rebuilt after an
-            // app update changed its format, or a first sync never finished. Sync now rather than wait.
+            // A server is configured but there's no synced library (a first sync never finished, or a
+            // schema change rebuilt the database). Sync now rather than wait for the schedule.
             if (libraryEmpty) {
                 val settings = app.syncSettings.settings.value
                 SyncWorker.schedule(app, settings)

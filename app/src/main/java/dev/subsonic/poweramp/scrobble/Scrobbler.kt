@@ -52,7 +52,7 @@ class Scrobbler(private val app: SubsonicApp) {
             PowerampApi.ACTION_TRACK_CHANGED_EXPLICIT -> {
                 val track = intent.getBundleExtra(PowerampApi.EXTRA_TRACK)
                 val path = track?.getString(PowerampApi.Track.PATH)
-                val songId = TrackPaths.songId(path, SubsonicDocumentsProvider.AUTHORITY, streamPrefix())
+                val songId = TrackPaths.songId(path, SubsonicDocumentsProvider.AUTHORITY)
                 Log.d(TAG, "Track changed: ${TrackPaths.redacted(path)} -> ${songId ?: "not ours"}")
                 val durationMs = track?.getInt(PowerampApi.Track.DURATION_MS, 0)?.toLong()?.takeIf { it > 0 }
                     ?: ((track?.getInt(PowerampApi.Track.DURATION, 0) ?: 0) * 1000L)
@@ -116,7 +116,6 @@ class Scrobbler(private val app: SubsonicApp) {
 
     private fun currentServer(): SavedServer? = app.credentialStore.server.value ?: app.credentialStore.load()
 
-    private fun streamPrefix(): String? = currentServer()?.baseUrl?.let { "${it}rest/stream" }
 
     private fun loadState(): PlaybackTracker.State = try {
         prefs.getString(KEY_STATE, null)?.let { json.decodeFromString(PlaybackTracker.State.serializer(), it) }

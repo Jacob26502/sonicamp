@@ -283,7 +283,10 @@ class LibraryDatabase(context: Context, name: String? = "library.db") :
     }
 
     private companion object {
-        /** 2: composer/audio format columns, folders table, album cover. */
+        /**
+         * Schema version. Any change simply drops and rebuilds the database (it's a cache of the
+         * server). Left at 2 for 0.1.0: going back to 1 would wipe libraries already synced.
+         */
         const val VERSION = 2
         const val KEY_IDENTITY = "identity"
         const val KEY_LIBRARY_VERSION = "library_version"

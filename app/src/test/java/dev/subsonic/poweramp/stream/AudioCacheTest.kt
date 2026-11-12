@@ -64,14 +64,6 @@ class AudioCacheTest {
     }
 
     @Test
-    fun `records from before the size was stored are still read`() {
-        val f = put("old", 4000, complete = true, age = 0)
-        java.io.File(f.path + SparseFile.RANGES_SUFFIX).writeText("0,4000") // 5b format
-        assertEquals(1, cache.stats().completeTracks)
-        SparseFile(f, 4000).use { assertTrue("cached bytes kept, no re-download", it.isComplete) }
-    }
-
-    @Test
     fun `trim removes least recently used, never files in use`() {
         val oldest = put("old", 4000, true, age = 30_000)
         val playing = put("playing", 4000, true, age = 20_000)
