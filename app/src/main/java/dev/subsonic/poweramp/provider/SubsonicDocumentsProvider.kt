@@ -8,7 +8,10 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Bundle
 import android.os.CancellationSignal
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.ParcelFileDescriptor
+import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.provider.DocumentsContract.Root
@@ -162,9 +165,44 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
                 throw FileNotFoundException(t.message)
             }
         }
-        // Poweramp plays our tracks from their URL and never calls this. Byte-level access for other
-        // apps (and offline caching) comes with phase 5.
-        throw FileNotFoundException("$documentId is streamed by URL; play it in Poweramp")
+        if (doc is DocId.Track) {
+            try {
+                return openTrack(doc.trackId)
+            } catch (e: FileNotFoundException) {
+                throw e
+            } catch (t: Throwable) {
+                Log.e(TAG, "openDocument $documentId", t)
+                throw FileNotFoundException(t.message)
+            }
+        }
+        throw FileNotFoundException("$documentId is not a file")
+    }
+
+    /**
+     * A seekable descriptor for the original file, served from the audio cache and filled from the
+     * server as needed. Returns at once: the size is known from the library, and nothing is fetched
+     * until Poweramp reads (it times out slow opens).
+     */
+    private fun openTrack(trackId: String): ParcelFileDescriptor {
+        val track = db.track(trackId) ?: notFound("track:$trackId")
+        val size = track.sizeBytes?.takeIf { it > 0 } ?: notFound("track:$trackId (unknown size)")
+        val server = currentServer() ?: notFound("track:$trackId (no server)")
+        val sessions = app.streamSessions
+        val session = sessions.acquire(server, trackId, size, client(server).streamUrl(trackId, format = "raw"))
+        val thread = HandlerThread("fd-$trackId").apply { start() }
+        val callback = RemoteFileCallback(session) {
+            sessions.release(session)
+            thread.quitSafely()
+        }
+        Log.d(TAG, "Opening track $trackId ($size bytes${if (session.isComplete) ", cached" else ""})")
+        return try {
+            context!!.getSystemService(StorageManager::class.java)
+                .openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY, callback, Handler(thread.looper))
+        } catch (t: Throwable) {
+            sessions.release(session)
+            thread.quitSafely()
+            throw t
+        }
     }
 
     override fun openDocumentThumbnail(documentId: String, sizeHint: Point?, signal: CancellationSignal?): AssetFileDescriptor {
@@ -274,10 +312,9 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             add(Document.COLUMN_SIZE, t.sizeBytes)
             add(Document.COLUMN_FLAGS, if (t.coverArt != null) Document.FLAG_SUPPORTS_THUMBNAIL else 0)
 
+            // No COLUMN_URL: tracks are files, read through openDocument (seekable, no token in Poweramp).
             // Having TITLE/DURATION tells Poweramp to trust these tags and not read the file.
-            add(TrackProviderConsts.COLUMN_URL, TrackProviderConsts.DYNAMIC_URL)
             add(MediaStore.MediaColumns.TITLE, t.title)
-            // Milliseconds; > 0 makes it a seekable remote file rather than a live stream.
             add(MediaStore.Audio.AudioColumns.DURATION, (t.durationSec ?: 0) * 1000L)
             add(MediaStore.Audio.AudioColumns.ARTIST, t.artist)
             add(MediaStore.Audio.AudioColumns.ALBUM, t.album)
@@ -349,47 +386,19 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
     }
 
     /**
-     * Entries are paths relative to the Playlists folder ("../Artist/Album/file.flac"), built from the
-     * folders' display names. Poweramp (build 1035) resolves them against the playlist's own folder:
-     * seen on device, "../Artist/Album/file" played our tracks, while the readme's "Album/file" form
-     * resolved to "<root>/Album/file", which doesn't exist.
+     * Entries are Poweramp's own path for each library track, "@authority/<root doc id>/<track doc id>"
+     * (URL-encoded), as it reports in track broadcasts. Found by probing on device (Poweramp build 1035):
+     * it stores provider files under the root folder by document id, so name-based entries
+     * ("Album/file.flac", "../Artist/Album/file.flac") never match, and document URIs play as
+     * outside files (Poweramp downloads the whole file first).
      */
-    private fun playlistText(name: String, tracks: List<TrackRow>): String {
-        val albumDirs = HashMap<String, String>()
-        fun dirOf(t: TrackRow): String {
-            val albumId = t.albumId ?: return ""
-            return albumDirs.getOrPut(albumId) {
-                val album = db.albumFolder(albumId) ?: return@getOrPut ""
-                val artist = album.albumArtistId?.let { db.artistFolder(album.libraryId, it) }
-                listOfNotNull(artist?.name, album.name).joinToString("") { cleanName(it) + "/" }
-            }
-        }
-        return buildString {
-            append("#EXTM3U\n")
-            append("#PLAYLIST:").append(name.replace('\n', ' ')).append('\n')
-            // TEMPORARY format probe (debug builds): the first track in several entry forms, to see
-            // which Poweramp resolves. Remove once settled.
-            val probe = tracks.firstOrNull()
-            if (probe != null && (context!!.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
-                val album = probe.albumId?.let { db.albumFolder(it)?.name }?.let(::cleanName) ?: ""
-                val file = displayName(probe)
-                val tree = "content://$AUTHORITY/tree/" + Uri.encode(DocId.Library(probe.libraryId).encoded)
-                listOf(
-                    "PROBE1 relative-up" to "../${dirOf(probe)}$file",
-                    "PROBE2 album-file" to "$album/$file",
-                    "PROBE3 at-authority" to "@$AUTHORITY/${Uri.encode(DocId.Library(probe.libraryId).encoded)}/${dirOf(probe)}$file",
-                    "PROBE4 tree-doc-uri" to "$tree/document/${Uri.encode(DocId.Track(probe.id).encoded)}",
-                    "PROBE5 doc-uri" to DocumentsContract.buildDocumentUri(AUTHORITY, DocId.Track(probe.id).encoded).toString(),
-                ).forEach { (label, entry) ->
-                    append("#EXTINF:").append(probe.durationSec ?: -1).append(',').append(label).append('\n')
-                    append(entry).append('\n')
-                }
-            }
-            tracks.forEach { t ->
-                val label = listOfNotNull(t.artist, t.title).joinToString(" - ").replace('\n', ' ')
-                append("#EXTINF:").append(t.durationSec ?: -1).append(',').append(label).append('\n')
-                append("../").append(dirOf(t)).append(displayName(t)).append('\n')
-            }
+    private fun playlistText(name: String, tracks: List<TrackRow>): String = buildString {
+        append("#EXTM3U\n")
+        append("#PLAYLIST:").append(name.replace('\n', ' ')).append('\n')
+        tracks.forEach { t ->
+            val label = listOfNotNull(t.artist, t.title).joinToString(" - ").replace('\n', ' ')
+            append("#EXTINF:").append(t.durationSec ?: -1).append(',').append(label).append('\n')
+            append(playlistEntry(t)).append('\n')
         }
     }
 
@@ -439,11 +448,11 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
 
         /**
          * When the provider last changed how it presents existing data (here: track file names built
-         * from tags, playlist entry format, 2026-11-12). Poweramp only re-reads folders whose time
-         * changed, so no folder or track is reported as older than this. Raise it whenever names,
-         * playlist contents or columns change.
+         * from tags, tracks as files instead of URLs, playlist entries by doc id, 2026-11-12). Poweramp
+         * only re-reads folders whose time changed, so no folder or track is reported as older than
+         * this. Raise it whenever names, playlist contents or columns change.
          */
-        const val PRESENTATION_CHANGED_AT = 1_794_482_000_000L
+        const val PRESENTATION_CHANGED_AT = 1_794_492_000_000L
 
         fun shown(lastModified: Long) = maxOf(lastModified, PRESENTATION_CHANGED_AT)
         const val PLAYLISTS_FOLDER_NAME = "Playlists"
@@ -485,6 +494,10 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             val fromPath = t.path?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
             return cleanName(fromPath ?: "")
         }
+
+        /** Poweramp's path for a track of ours: "@authority/lib%3A1/track%3A<id>". */
+        fun playlistEntry(t: TrackRow): String =
+            "@$AUTHORITY/" + Uri.encode(DocId.Library(t.libraryId).encoded) + "/" + Uri.encode(DocId.Track(t.id).encoded)
 
         /** '/' would break Poweramp's path-style matching. */
         fun cleanName(name: String) = name.replace('/', '∕').ifBlank { "Unknown" }

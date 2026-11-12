@@ -9,32 +9,14 @@ An Android app that makes a Subsonic / OpenSubsonic server (developed against **
 |---|---|---|
 | 1 | Subsonic client, login screen, encrypted credentials | done |
 | 2 | Local library database, scheduled sync | done |
-| 3 | Poweramp track provider (browse + stream) | done, see known limitations |
-| 4 | Lyrics, playlists in Poweramp, scrobbling | done, see known limitations |
-| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | planned |
+| 3 | Poweramp track provider (browse + stream) | done |
+| 4 | Lyrics, playlists in Poweramp, scrobbling | done |
+| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | 5a–5b done (streaming, cache); 5c settings/offline, 5d transcoding next |
 
-### Known limitations (phases 3–4)
-
-Tracks are handed to Poweramp as "dynamic URL" tracks: Poweramp asks for a fresh stream URL at
-playback time. Tested on Poweramp build 1035, this means:
-
-- **Seeking doesn't work** (seekbar or tapping a lyric line): Poweramp reads the stream once from
-  the start and never asks the server for another position, so a seek goes silent.
-- **Playlist entries don't resolve:** the Playlists folder and its `.m3u8` files appear, but
-  Poweramp can't match entries to URL tracks by folder/file name. Document-URI entries reach the
-  provider but fail because tracks can't be opened as files yet. Debug builds start each playlist
-  with "PROBE" entries in five formats to test this; they go once a format is settled.
-- **The stream URL, including the login token, is in Poweramp's track-change broadcasts**, which any
-  app registered for them can read.
-
-- **Info/Tags shows the track as a "Stream"** with empty Title/Genre/Artist fields. Poweramp does not
-  ask the provider for tags there for URL tracks. The player, lists and library categories do show
-  our tags.
-- **Info/Tags displays the full stream URL, including the login token** (`u`, `t`, `s`). The token
-  stays valid until the Navidrome password changes.
-
-Phase 5 addresses all of these by streaming the audio through the app (a seekable file descriptor
-backed by HTTP range requests), so Poweramp treats tracks as files and never sees a URL.
+Phases 3–4 handed tracks to Poweramp as stream URLs. On Poweramp build 1035 that broke seeking,
+showed tracks as an empty "Stream" in Info/Tags with the login token in the URL, and stopped playlist
+entries from resolving. Phase 5 replaced URLs with files streamed through the app, which fixed all
+of these (tested on device).
 
 ## How it works
 
@@ -64,9 +46,22 @@ backed by HTTP range requests), so Poweramp treats tracks as files and never see
   (`Artist/Album/01-01 - Title.flac`), so it's only a fallback for tracks without a title. When the
   way existing data is presented changes, `PRESENTATION_CHANGED_AT` in the provider is raised so
   Poweramp re-reads every folder.
+- **Playback:** tracks are files to Poweramp. `openDocument` returns a seekable descriptor
+  (`StorageManager.openProxyFileDescriptor`) whose reads are served from a cache file, filled from
+  the server with byte-range requests. One background download per track reads ahead from the play
+  position (the whole track on unmetered networks, 8 MB ahead on metered ones); reads elsewhere (tag
+  peeks near the end, the first read after a seek) fetch one 256 KB block, and the download follows
+  if playback continues there. Dropped connections are retried; a read gives up after 20 s rather
+  than hanging Poweramp. Opening needs no network: the size comes from the library.
+- **Audio cache:** played tracks stay in `cache/audio` (which byte ranges are present is stored
+  beside each file), so replays and fully downloaded tracks play without the server. Capped at 2 GB,
+  least recently used first.
 - **Playlists:** server playlists appear as `.m3u8` files in a "Playlists" folder in the first
-  library's root (entries don't resolve yet, see known limitations). One way: changes made in
-  Poweramp are not sent back.
+  library's root. Entries are Poweramp's own path for each track,
+  `@dev.subsonic.poweramp.provider/lib%3A1/track%3A<id>`: probing on device showed Poweramp keeps
+  provider files under the root folder by document id, so name-based entries (`Album/file.flac`)
+  never match and document URIs play as outside files. One way: changes made in Poweramp are not
+  sent back. Entries only resolve when the whole library root was added in Music Folders.
 - **Scrobbling:** Poweramp's track/status broadcasts tell the app what plays. For our tracks it sends
   "now playing" (OpenSubsonic `reportPlayback`, or `scrobble` with `submission=false`) and, once a
   track has played for half its length or 4 minutes (tracks under 30 s never count), queues a
@@ -81,6 +76,7 @@ app/src/main/java/dev/subsonic/poweramp/
   sync/       Sync logic (pure Kotlin) plus WorkManager worker, status and settings
   library/    SQLite library database (albums and artists are views over tracks)
   provider/   Poweramp track provider (DocumentsProvider), document ids, cover cache, playlist files
+  stream/     Streaming tracks into the audio cache with range requests (session logic unit-tested on the JVM)
   lyrics/     Lyrics fetching, LRC conversion and cache
   scrobble/   Playback tracking from Poweramp broadcasts, scrobble queue and worker
   poweramp/   Poweramp API constants, rescan requests, broadcast receiver
@@ -137,11 +133,12 @@ Debug builds log every HTTP request under the `SubsonicHttp` tag with credential
 (`u=***&t=***&s=***`):
 
 ```bash
-adb logcat -s SubsonicHttp SyncWorker SubsonicProvider PowerampRescans Scrobbler ScrobbleWorker SubsonicLyrics
+adb logcat -s SubsonicHttp SyncWorker SubsonicProvider SubsonicStream PowerampRescans Scrobbler ScrobbleWorker SubsonicLyrics
 ```
 
-`SubsonicProvider` logs each distinct set of columns Poweramp requests, scan starts, playback-URL
-requests (track id only) and cover fetches.
+`SubsonicProvider` logs each distinct set of columns Poweramp requests, scan starts, track opens and
+cover fetches. `SubsonicStream` logs seeks and, when a track's session closes, how many requests it
+took and how much is cached. Logs never contain stream URLs or tokens, only track ids.
 
 ### Testing on a phone over USB
 

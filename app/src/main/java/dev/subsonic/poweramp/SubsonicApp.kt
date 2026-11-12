@@ -10,6 +10,8 @@ import dev.subsonic.poweramp.poweramp.PowerampRescans
 import dev.subsonic.poweramp.provider.CoverCache
 import dev.subsonic.poweramp.provider.SubsonicDocumentsProvider
 import dev.subsonic.poweramp.scrobble.Scrobbler
+import dev.subsonic.poweramp.stream.AudioCache
+import dev.subsonic.poweramp.stream.StreamSessions
 import java.io.File
 import dev.subsonic.poweramp.settings.CredentialStore
 import dev.subsonic.poweramp.subsonic.RedactingLogInterceptor
@@ -59,6 +61,11 @@ class SubsonicApp : Application() {
 
     val scrobbler: Scrobbler by lazy { Scrobbler(this) }
 
+    /** Played tracks; capped (setting comes in phase 5c). In cacheDir, so Android may also clear it. */
+    val audioCache: AudioCache by lazy { AudioCache(File(cacheDir, "audio")) { DEFAULT_AUDIO_CACHE_BYTES } }
+
+    val streamSessions: StreamSessions by lazy { StreamSessions(this, httpClient, audioCache) }
+
     /** For short background work started from broadcast receivers. */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -71,6 +78,10 @@ class SubsonicApp : Application() {
     /** Tells Storage Access Framework clients (pickers, Poweramp's folder dialog) the roots changed. */
     fun notifyProviderRootsChanged() {
         contentResolver.notifyChange(DocumentsContract.buildRootsUri(SubsonicDocumentsProvider.AUTHORITY), null)
+    }
+
+    companion object {
+        const val DEFAULT_AUDIO_CACHE_BYTES = 2L * 1024 * 1024 * 1024
     }
 
     override fun onCreate() {

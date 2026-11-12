@@ -145,7 +145,7 @@ class SubsonicDocumentsProviderTest {
         val first = tracks[0]
         assertEquals("Title d1t1", first[MediaStore.MediaColumns.TITLE])
         assertEquals(200_000L, first[MediaStore.Audio.AudioColumns.DURATION])
-        assertEquals(TrackProviderConsts.DYNAMIC_URL, first[TrackProviderConsts.COLUMN_URL])
+        assertNull("tracks are files now, not URLs", first[TrackProviderConsts.COLUMN_URL])
         assertEquals("01. Title d1t1.flac", first[Document.COLUMN_DISPLAY_NAME])
         assertEquals("audio/flac", first[Document.COLUMN_MIME_TYPE])
         assertEquals("Kosaki", first[TrackProviderConsts.COLUMN_ALBUM_ARTIST])
@@ -237,9 +237,9 @@ class SubsonicDocumentsProviderTest {
                 "#EXTM3U",
                 "#PLAYLIST:Road/Trip",
                 "#EXTINF:200,Andora - Title solo",
-                "../Andora/Single/01. Title solo.flac",
+                "@dev.subsonic.poweramp.provider/lib%3A1/track%3Asolo",
                 "#EXTINF:200,Kosaki - Title d2t1",
-                "../Kosaki/OST/01. Title d2t1.flac",
+                "@dev.subsonic.poweramp.provider/lib%3A1/track%3Ad2t1",
             ),
             text.trim().lines(),
         )
@@ -253,9 +253,11 @@ class SubsonicDocumentsProviderTest {
     }
 
     @Test
-    fun tracksAreNotOpenable() {
+    fun tracksOpenAsSeekableFilesOfTheLibrarySize() {
+        // Opening must not touch the network (the test server doesn't exist); reads would.
         val uri = DocumentsContract.buildDocumentUri(authority, "track:d1t1")
-        assertTrue(runCatching { resolver.openInputStream(uri)!!.close() }.isFailure)
+        resolver.openFileDescriptor(uri, "r")!!.use { assertEquals(5_000L, it.statSize) }
+        assertTrue(runCatching { resolver.openFileDescriptor(uri, "w") }.isFailure)
     }
 
     @Test

@@ -18,6 +18,8 @@ class TrackPathsTest {
     @Test
     fun `poweramp style path with the document id as last segment`() {
         assertEquals("x1", TrackPaths.songId("$auth/lib:1/artist:1:a/album:b/track:x1", auth))
+        // What Poweramp build 1035 reports for file tracks of ours.
+        assertEquals("28FIzos80pG8j3nvohEIMD", TrackPaths.songId("@$auth/lib%3A1/track%3A28FIzos80pG8j3nvohEIMD", auth))
     }
 
     @Test

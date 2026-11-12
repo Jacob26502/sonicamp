@@ -137,6 +137,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 app.libraryDatabase.wipe()
                 app.coverCache.clear()
                 app.lyrics.clear()
+                app.audioCache.clear(app.streamSessions.inUse())
                 app.scrobbler.reset()
             }
             app.serverFeatures.clear()
