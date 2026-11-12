@@ -1,0 +1,13 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local Navidrome test server: database and music stay out of version control
+Navidrome/data/
+Navidrome/music/
