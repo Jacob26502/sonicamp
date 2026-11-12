@@ -31,6 +31,21 @@ import androidx.compose.ui.unit.dp
 import dev.subsonic.poweramp.stream.CacheSettings
 import dev.subsonic.poweramp.sync.SyncSettings
 
+@Composable
+private fun QualityRow(label: String, selected: Int, onChange: (Int) -> Unit) {
+    Text(label, style = MaterialTheme.typography.bodyMedium)
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        val choices = CacheSettings.QUALITY_CHOICES
+        choices.forEachIndexed { index, kbps ->
+            SegmentedButton(
+                selected = selected == kbps,
+                onClick = { onChange(kbps) },
+                shape = SegmentedButtonDefaults.itemShape(index, choices.size),
+            ) { Text(if (kbps == CacheSettings.ORIGINAL) "Orig." else "$kbps", maxLines = 1) }
+        }
+    }
+}
+
 private fun formatBytes(bytes: Long): String = when {
     bytes >= 1024L * 1024 * 1024 -> "%.1f GB".format(bytes / (1024.0 * 1024 * 1024))
     bytes >= 1024L * 1024 -> "%.0f MB".format(bytes / (1024.0 * 1024))
@@ -49,6 +64,9 @@ fun LibrarySection(
     onCacheMaxGbChange: (Int) -> Unit,
     onWholeTracksOnMobileChange: (Boolean) -> Unit,
     onClearCache: () -> Unit,
+    onWifiQualityChange: (Int) -> Unit,
+    onMobileQualityChange: (Int) -> Unit,
+    onAutoUpgradeChange: (Boolean) -> Unit,
     onForget: () -> Unit,
 ) {
     var confirmForget by remember { mutableStateOf(false) }
@@ -146,6 +164,29 @@ fun LibrarySection(
         }
         Spacer(Modifier.size(8.dp))
         Switch(checked = state.scrobbleEnabled, onCheckedChange = onScrobbleChange)
+    }
+
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    Text("Streaming quality", style = MaterialTheme.typography.headlineSmall)
+    Text(
+        "Original plays the file as it is on the server. A bitrate asks the server to convert to MP3 " +
+            "first, which uses far less data. A track already fully downloaded in original quality " +
+            "always plays from the phone.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    QualityRow("On Wi-Fi", cache.settings.wifiQuality, onWifiQualityChange)
+    QualityRow("On mobile data", cache.settings.mobileQuality, onMobileQualityChange)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Upgrade to original quality", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Tracks cached at a lower bitrate are replaced with the original in the background, " +
+                    "on Wi-Fi while charging. Never removes other music to make room.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        Switch(checked = cache.settings.autoUpgrade, onCheckedChange = onAutoUpgradeChange)
     }
 
     HorizontalDivider(Modifier.padding(vertical = 8.dp))

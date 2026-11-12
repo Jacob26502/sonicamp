@@ -11,7 +11,7 @@ An Android app that makes a Subsonic / OpenSubsonic server (developed against **
 | 2 | Local library database, scheduled sync | done |
 | 3 | Poweramp track provider (browse + stream) | done |
 | 4 | Lyrics, playlists in Poweramp, scrobbling | done |
-| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | 5a–5c done (streaming, cache, cache settings); 5d transcoding next |
+| 5 | Stream through the app (file descriptor), offline cache, transcoding with seeking | done |
 
 Phases 3–4 handed tracks to Poweramp as stream URLs. On Poweramp build 1035 that broke seeking,
 showed tracks as an empty "Stream" in Info/Tags with the login token in the URL, and stopped playlist
@@ -57,7 +57,21 @@ of these (tested on device).
   present are stored beside each file), so replays and fully downloaded tracks play without the
   server. The app shows usage and fully downloaded tracks, has a size limit (1/2/5/10 GB, default 2,
   least recently used removed first, never the track playing), "Clear cache", and an option to
-  download whole tracks on mobile data too.
+  download whole tracks on mobile data too. A ".meta" file beside each cache file records which
+  track and format it holds.
+- **Transcoding:** separate quality settings for Wi-Fi and mobile data: Original, or constant-bitrate
+  MP3 at 320/256/192/128 kbps (MP3 because its size is predictable: Navidrome's output measured within
+  0.8% of duration × bitrate). Servers don't support range requests on transcodes, so the MP3 is
+  downloaded once from the start into the cache. Poweramp is given a slightly generous size,
+  (duration + 1 s) × bitrate + 96 KB; the gap after the real end is zero-padded (MP3 decoders skip
+  zeros), and the last 64 KB is always zeros so Poweramp's tag peeks at the end of the file are
+  answered at once. Navidrome transcodes ~50× real time, so a forward seek waits only briefly. Never
+  uses Navidrome's `estimateContentLength`: it cuts the stream off at the estimate. Poweramp plays
+  the MP3 although the track was scanned as the original format. A fully cached original always
+  wins, and a track whose original bitrate is no higher than the target isn't transcoded.
+- **Upgrading:** once a track's original is fully cached its transcoded copies are deleted. A
+  background job (unmetered network, charging, battery not low) downloads originals for tracks
+  cached only as transcodes, and stops rather than evict other music when the cache is full.
 - **Playlists:** server playlists appear as `.m3u8` files in a "Playlists" folder in the first
   library's root. Entries are Poweramp's own path for each track,
   `@dev.subsonic.poweramp.provider/lib%3A1/track%3A<id>`: probing on device showed Poweramp keeps
@@ -129,13 +143,17 @@ music on its own. Rescan after adding files:
 .\Navidrome\rescan.ps1 -Full  # re-read every file
 ```
 
+The compose file also turns off Navidrome's transcoding cache (`ND_TRANSCODINGCACHESIZE: "0"`): on
+Docker Desktop for Windows, reading that cache back through the mounted `data/` folder fails with "no
+data available", which truncates MP3/AAC transcodes to a few KB.
+
 ## Debugging
 
 Debug builds log every HTTP request under the `SubsonicHttp` tag with credentials masked
 (`u=***&t=***&s=***`):
 
 ```bash
-adb logcat -s SubsonicHttp SyncWorker SubsonicProvider SubsonicStream PowerampRescans Scrobbler ScrobbleWorker SubsonicLyrics
+adb logcat -s SubsonicHttp SyncWorker SubsonicProvider SubsonicStream SubsonicUpgrade PowerampRescans Scrobbler ScrobbleWorker SubsonicLyrics
 ```
 
 `SubsonicProvider` logs each distinct set of columns Poweramp requests, scan starts, track opens and

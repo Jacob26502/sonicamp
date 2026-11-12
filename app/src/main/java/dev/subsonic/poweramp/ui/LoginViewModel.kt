@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.subsonic.poweramp.SubsonicApp
 import dev.subsonic.poweramp.scrobble.ScrobbleWorker
+import dev.subsonic.poweramp.stream.UpgradeWorker
 import dev.subsonic.poweramp.settings.SavedServer
 import dev.subsonic.poweramp.subsonic.ConnectionTester
 import dev.subsonic.poweramp.subsonic.ServerInfo
@@ -132,6 +133,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             SyncWorker.cancelAll(app)
             ScrobbleWorker.cancel(app)
+            UpgradeWorker.cancel(app)
             withContext(Dispatchers.IO) {
                 app.credentialStore.clear()
                 app.libraryDatabase.wipe()

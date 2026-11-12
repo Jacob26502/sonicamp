@@ -80,6 +80,9 @@ fun LoginRoute(
                     onCacheMaxGbChange = libraryViewModel::setCacheMaxGb,
                     onWholeTracksOnMobileChange = libraryViewModel::setWholeTracksOnMobile,
                     onClearCache = libraryViewModel::clearCache,
+                    onWifiQualityChange = libraryViewModel::setWifiQuality,
+                    onMobileQualityChange = libraryViewModel::setMobileQuality,
+                    onAutoUpgradeChange = libraryViewModel::setAutoUpgrade,
                     onForget = viewModel::forgetServer,
                 )
             }

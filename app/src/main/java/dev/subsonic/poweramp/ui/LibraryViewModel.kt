@@ -10,6 +10,7 @@ import dev.subsonic.poweramp.sync.SyncStatus
 import dev.subsonic.poweramp.sync.SyncWorker
 import dev.subsonic.poweramp.stream.AudioCache
 import dev.subsonic.poweramp.stream.CacheSettings
+import dev.subsonic.poweramp.stream.UpgradeWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
@@ -87,6 +88,15 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setWholeTracksOnMobile(enabled: Boolean) = app.cacheSettings.update { it.copy(wholeTracksOnMobile = enabled) }
+
+    fun setWifiQuality(kbps: Int) = app.cacheSettings.update { it.copy(wifiQuality = kbps) }
+
+    fun setMobileQuality(kbps: Int) = app.cacheSettings.update { it.copy(mobileQuality = kbps) }
+
+    fun setAutoUpgrade(enabled: Boolean) {
+        app.cacheSettings.update { it.copy(autoUpgrade = enabled) }
+        if (enabled) UpgradeWorker.enqueue(app) else UpgradeWorker.cancel(app)
+    }
 
     fun clearCache() {
         viewModelScope.launch(Dispatchers.IO) {

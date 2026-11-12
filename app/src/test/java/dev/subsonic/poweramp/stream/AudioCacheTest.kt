@@ -45,6 +45,25 @@ class AudioCacheTest {
     }
 
     @Test
+    fun `records say what each file holds, and other versions of a track can be dropped`() {
+        val raw = put("t", 4000, complete = true, age = 0)
+        val mp3 = cache.fileFor("srv", "t", 1000, "mp3-192")
+        SparseFile(mp3, 1000).use { it.write(0, ByteArray(1000), 0, 1000) }
+        val other = cache.fileFor("srv", "u", 1000, "mp3-192")
+        SparseFile(other, 1000).use { it.write(0, ByteArray(1000), 0, 1000) }
+        cache.writeMeta(raw, "srv", "t", "raw", 4000)
+        cache.writeMeta(mp3, "srv", "t", "mp3-192", 1000)
+        cache.writeMeta(other, "srv", "u", "mp3-192", 1000)
+
+        assertEquals(setOf("t/raw", "t/mp3-192", "u/mp3-192"), cache.entries().map { "${it.trackId}/${it.variant}" }.toSet())
+        assertEquals(1, cache.dropOtherVariants("srv", "t", "raw", inUse = emptySet()))
+        assertFalse(mp3.exists())
+        assertFalse(java.io.File(mp3.path + AudioCache.META_SUFFIX).exists())
+        assertTrue(raw.exists())
+        assertTrue("another track's copy stays", other.exists())
+    }
+
+    @Test
     fun `records from before the size was stored are still read`() {
         val f = put("old", 4000, complete = true, age = 0)
         java.io.File(f.path + SparseFile.RANGES_SUFFIX).writeText("0,4000") // 5b format

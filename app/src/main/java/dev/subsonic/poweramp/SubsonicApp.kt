@@ -13,6 +13,7 @@ import dev.subsonic.poweramp.scrobble.Scrobbler
 import dev.subsonic.poweramp.stream.AudioCache
 import dev.subsonic.poweramp.stream.CacheSettingsStore
 import dev.subsonic.poweramp.stream.StreamSessions
+import dev.subsonic.poweramp.stream.UpgradeWorker
 import java.io.File
 import dev.subsonic.poweramp.settings.CredentialStore
 import dev.subsonic.poweramp.subsonic.RedactingLogInterceptor
@@ -68,7 +69,11 @@ class SubsonicApp : Application() {
     val audioCache: AudioCache by lazy { AudioCache(File(cacheDir, "audio")) { cacheSettings.settings.value.maxBytes } }
 
     val streamSessions: StreamSessions by lazy {
-        StreamSessions(this, httpClient, audioCache) { cacheSettings.settings.value }
+        StreamSessions(
+            this, httpClient, audioCache,
+            settings = { cacheSettings.settings.value },
+            onTranscodePlayed = { if (cacheSettings.settings.value.autoUpgrade) UpgradeWorker.enqueue(this) },
+        )
     }
 
     /** For short background work started from broadcast receivers. */

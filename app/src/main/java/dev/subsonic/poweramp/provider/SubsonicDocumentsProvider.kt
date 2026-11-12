@@ -188,13 +188,17 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         val size = track.sizeBytes?.takeIf { it > 0 } ?: notFound("track:$trackId (unknown size)")
         val server = currentServer() ?: notFound("track:$trackId (no server)")
         val sessions = app.streamSessions
-        val session = sessions.acquire(server, trackId, size, client(server).streamUrl(trackId, format = "raw"))
+        val client = client(server)
+        val source = sessions.chooseSource(server, trackId, size, track.durationSec, track.bitRate) { kbps, format ->
+            client.streamUrl(trackId, maxBitRateKbps = kbps, format = format)
+        }
+        val session = sessions.acquire(server, trackId, source)
         val thread = HandlerThread("fd-$trackId").apply { start() }
         val callback = RemoteFileCallback(session) {
             sessions.release(session)
             thread.quitSafely()
         }
-        Log.d(TAG, "Opening track $trackId ($size bytes${if (session.isComplete) ", cached" else ""})")
+        Log.d(TAG, "Opening track $trackId (${source.variant}, ${source.size} bytes${if (session.isComplete) ", cached" else ""})")
         return try {
             context!!.getSystemService(StorageManager::class.java)
                 .openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY, callback, Handler(thread.looper))
