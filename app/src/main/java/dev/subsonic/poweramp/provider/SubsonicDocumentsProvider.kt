@@ -77,7 +77,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
                 c.newRow().apply {
                     add(Root.COLUMN_ROOT_ID, id)
                     add(Root.COLUMN_DOCUMENT_ID, id)
-                    add(Root.COLUMN_TITLE, if (libraries.size > 1) "Sonicamp: ${lib.name}" else "Sonicamp")
+                    add(Root.COLUMN_TITLE, if (libraries.size > 1) "Sonic-Amp: ${lib.name}" else "Sonic-Amp")
                     add(Root.COLUMN_SUMMARY, "${lib.name} · ${server.baseUrl.host}")
                     add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_IS_CHILD) // required by Poweramp's folder picker
                     add(Root.COLUMN_ICON, R.mipmap.ic_launcher)

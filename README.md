@@ -1,4 +1,4 @@
-# Sonicamp
+# Sonic-Amp
 
 A mostly Vibecoded app that allows you to connect a subsonic server to Poweramp (the best android audio player). Uses proxy files to provide data to poweramp, caches data and songs over time. Seems to work pretty well. Everything else in the readme is AI generated... Tx.
 
@@ -35,7 +35,7 @@ can't be matched by playlist entries.
 - **Poweramp provider:** a Storage Access Framework documents provider showing
   Library → Album artist → Album → Tracks, answered from the local database. Tracks carry full tags;
   multi-disc albums are numbered disc × 1000 + track so discs sort in order. Covers are fetched once
-  per album and cached. To add it: Poweramp → Settings → Library → Music Folders → + → Sonicamp.
+  per album and cached. To add it: Poweramp → Settings → Library → Music Folders → + → Sonic-Amp.
 - **Keeping Poweramp current:** after a sync that changed something the app asks Poweramp to rescan.
   If Poweramp ignores that (it only accepts scan requests while it or the app is in the foreground),
   the request is retried when Poweramp starts playing. Rescan in Poweramp also triggers a server sync
@@ -162,7 +162,7 @@ on every connected device.
 
 ## Licence
 
-Sonicamp is free software, licensed under the [GNU General Public License v3.0](LICENSE): you can
+Sonic-Amp is free software, licensed under the [GNU General Public License v3.0](LICENSE): you can
 use, study, share and modify it, and versions you distribute must stay under the same licence with
 their source available.
 
