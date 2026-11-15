@@ -1,9 +1,7 @@
 package dev.subsonic.poweramp.lyrics
 
 import android.util.Log
-import dev.subsonic.poweramp.subsonic.Extensions
-import dev.subsonic.poweramp.subsonic.ServerFeatures
-import dev.subsonic.poweramp.subsonic.SubsonicClient
+import dev.subsonic.poweramp.server.MusicServer
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -17,7 +15,6 @@ import java.security.MessageDigest
  */
 class LyricsRepository(
     private val dir: File,
-    private val features: ServerFeatures,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     @Serializable
@@ -29,17 +26,13 @@ class LyricsRepository(
      * @return the song's lyrics, [TrackLyrics.NONE] if it has none, or null if the server couldn't be
      *   reached and nothing is cached.
      */
-    suspend fun get(client: SubsonicClient, songId: String, artist: String?, title: String): TrackLyrics? {
-        val file = fileFor(client, songId)
+    suspend fun get(server: MusicServer, songId: String, artist: String?, title: String): TrackLyrics? {
+        val file = fileFor(server, songId)
         val cached = read(file)
         if (cached != null && !expired(cached)) return cached.lyrics
 
         val fresh = try {
-            if (features.supports(client.baseUrl.toString(), client, Extensions.SONG_LYRICS)) {
-                LyricsFormat.fromStructured(client.lyricsBySongId(songId))
-            } else {
-                LyricsFormat.fromPlain(client.lyrics(artist, title))
-            }
+            server.lyrics(songId, artist, title)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -60,8 +53,8 @@ class LyricsRepository(
     }
 
     /** Keyed by server and song, hashed so file names never contain server ids verbatim. */
-    private fun fileFor(client: SubsonicClient, songId: String): File {
-        val digest = MessageDigest.getInstance("SHA-256").digest("${client.baseUrl}\u0000$songId".toByteArray())
+    private fun fileFor(server: MusicServer, songId: String): File {
+        val digest = MessageDigest.getInstance("SHA-256").digest("${server.cacheKey}\u0000$songId".toByteArray())
         return File(dir, digest.take(16).joinToString("") { "%02x".format(it) } + ".json")
     }
 

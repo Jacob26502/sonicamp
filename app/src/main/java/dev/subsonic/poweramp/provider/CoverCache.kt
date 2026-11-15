@@ -2,7 +2,7 @@ package dev.subsonic.poweramp.provider
 
 import android.os.CancellationSignal
 import android.util.Log
-import dev.subsonic.poweramp.subsonic.SubsonicClient
+import dev.subsonic.poweramp.server.MusicServer
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -17,20 +17,20 @@ import java.io.IOException
 class CoverCache(private val dir: File, private val http: OkHttpClient) {
 
     /** Returns the cached file, downloading it first if needed. Blocking; call from a binder thread. */
-    fun get(client: SubsonicClient, coverArtId: String, requestedPx: Int, signal: CancellationSignal?): File {
+    fun get(server: MusicServer, coverArtId: String, requestedPx: Int, signal: CancellationSignal?): File {
         val size = bucket(requestedPx)
         val file = File(dir, "${safeName(coverArtId)}_$size.img")
         if (file.length() > 0) return file
 
         dir.mkdirs()
-        val call = http.newCall(Request.Builder().url(client.coverArtUrl(coverArtId, size)).build())
+        val call = http.newCall(Request.Builder().url(server.coverUrl(coverArtId, size)).build())
         signal?.setOnCancelListener { call.cancel() }
         try {
             call.execute().use { response ->
                 val body = response.body
                 val type = response.header("Content-Type").orEmpty()
                 if (!response.isSuccessful || body == null || !type.startsWith("image/")) {
-                    // Subsonic errors come back as JSON with HTTP 200; treat anything non-image as "no cover".
+                    // Some servers send errors as JSON with HTTP 200; treat anything non-image as "no cover".
                     throw FileNotFoundException("No cover for $coverArtId (HTTP ${response.code}, $type)")
                 }
                 // Write to a temp file and rename, so a half-written image is never served.

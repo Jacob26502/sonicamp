@@ -1,5 +1,6 @@
 package dev.subsonic.poweramp.subsonic
 
+import dev.subsonic.poweramp.server.ServerAuth
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -31,7 +32,7 @@ class SubsonicClientLibraryTest {
     }
 
     private fun client(http: OkHttpClient = OkHttpClient()) =
-        SubsonicClient(ServerUrl.parse(server.url("/").toString()), SubsonicAuth.Password("admin", "pw"), http)
+        SubsonicClient(ServerUrl.parse(server.url("/").toString()), ServerAuth.Password("admin", "pw"), http)
 
     private fun ok(inner: String) = MockResponse().setBody("""{"subsonic-response":{"status":"ok","version":"1.16.1"$inner}}""")
 

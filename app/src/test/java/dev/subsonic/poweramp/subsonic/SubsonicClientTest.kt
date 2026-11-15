@@ -1,5 +1,7 @@
 package dev.subsonic.poweramp.subsonic
 
+import dev.subsonic.poweramp.server.ServerAuth
+import dev.subsonic.poweramp.server.UnexpectedResponseException
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -28,7 +30,7 @@ class SubsonicClientTest {
         server.shutdown()
     }
 
-    private fun client(auth: SubsonicAuth? = SubsonicAuth.Password("admin", "pw")) =
+    private fun client(auth: ServerAuth? = ServerAuth.Password("admin", "pw")) =
         SubsonicClient(ServerUrl.parse(server.url("/").toString()), auth, http)
 
     private fun enqueueJson(body: String, code: Int = 200) =
@@ -74,7 +76,7 @@ class SubsonicClientTest {
     fun `subsonic error inside an HTTP 401 is still parsed`() = runTest {
         enqueueJson("""{"subsonic-response":{"status":"failed","error":{"code":44}}}""", code = 401)
         try {
-            client(SubsonicAuth.ApiKey("k")).ping()
+            client(ServerAuth.ApiKey("k")).ping()
             fail("expected exception")
         } catch (e: SubsonicApiException) {
             assertEquals(44, e.code)
@@ -106,7 +108,7 @@ class SubsonicClientTest {
 
     @Test
     fun `stream url carries id and auth under a reverse proxy path`() {
-        val c = SubsonicClient(ServerUrl.parse("https://example.com/navidrome"), SubsonicAuth.ApiKey("k"), http)
+        val c = SubsonicClient(ServerUrl.parse("https://example.com/navidrome"), ServerAuth.ApiKey("k"), http)
         val url = c.streamUrl("song1", maxBitRateKbps = 320)
         assertEquals("/navidrome/rest/stream.view", url.encodedPath)
         assertEquals("song1", url.queryParameter("id"))
@@ -116,15 +118,15 @@ class SubsonicClientTest {
     }
 
     @Test
-    fun `connection tester tolerates servers without the extensions endpoint`() = runTest {
+    fun `connect tolerates servers without the extensions endpoint`() = runTest {
         server.enqueue(MockResponse().setResponseCode(404).setBody("not found"))
         enqueueJson("""{"subsonic-response":{"status":"ok","version":"1.15.0"}}""")
 
-        val info = ConnectionTester(http).test(ServerUrl.parse(server.url("/").toString()), SubsonicAuth.Password("a", "b"))
+        val info = SubsonicServer(ServerUrl.parse(server.url("/").toString()), ServerAuth.Password("a", "b"), http, ServerFeatures())
+            .connect()
 
-        assertEquals("1.15.0", info.apiVersion)
-        assertFalse(info.openSubsonic)
-        assertTrue(info.extensions.isEmpty())
-        assertFalse(info.supportsApiKey)
+        assertEquals("Subsonic-compatible server", info.name)
+        assertEquals(listOf("Subsonic API 1.15.0"), info.details) // no OpenSubsonic, no extensions
+        assertEquals(false, info.supportsApiKeys)
     }
 }

@@ -1,5 +1,6 @@
 package dev.subsonic.poweramp.subsonic
 
+import dev.subsonic.poweramp.server.ServerAuth
 import dev.subsonic.poweramp.settings.SavedServer
 import dev.subsonic.poweramp.sync.InMemoryLibraryStore
 import dev.subsonic.poweramp.sync.LibrarySync
@@ -28,9 +29,10 @@ class LiveServerTest {
     fun `connection test succeeds against live server`() = runTest {
         assumeTrue("SUBSONIC_TEST_* not set; skipping live test", url != null && user != null && password != null)
 
-        val info = ConnectionTester(OkHttpClient()).test(ServerUrl.parse(url!!), SubsonicAuth.Password(user!!, password!!))
-        println("Live server: ${info.displayName}, API ${info.apiVersion}, extensions=${info.extensions.map { it.name }}")
-        assertEquals(SubsonicClient.API_VERSION, info.apiVersion)
+        val info = SubsonicServer(ServerUrl.parse(url!!), ServerAuth.Password(user!!, password!!), OkHttpClient(), ServerFeatures())
+            .connect()
+        println("Live server: ${info.name}; ${info.details}")
+        assertTrue(info.details.first().startsWith("Subsonic API ${SubsonicClient.API_VERSION}"))
     }
 
     @Test
@@ -38,8 +40,8 @@ class LiveServerTest {
         assumeTrue(url != null && user != null && password != null)
         val http = OkHttpClient()
         val store = InMemoryLibraryStore()
-        val sync = LibrarySync(store, { SubsonicClient(it.baseUrl, it.auth, http) })
-        val server = SavedServer(ServerUrl.parse(url!!), SubsonicAuth.Password(user!!, password!!))
+        val sync = LibrarySync(store, { SubsonicServer(it.baseUrl, it.auth, http, ServerFeatures()) })
+        val server = SavedServer(ServerUrl.parse(url!!), ServerAuth.Password(user!!, password!!))
 
         val first = sync.sync(server)
         println("Live first sync: ${first.summary()}; playlists=${store.playlists.keys.size}; albumArtists=${store.tracks.values.map { it.albumArtist }.distinct()}")
@@ -55,7 +57,7 @@ class LiveServerTest {
     fun `wrong password is rejected with code 40`() = runTest {
         assumeTrue(url != null && user != null)
         try {
-            SubsonicClient(ServerUrl.parse(url!!), SubsonicAuth.Password(user!!, "definitely-wrong"), OkHttpClient()).ping()
+            SubsonicClient(ServerUrl.parse(url!!), ServerAuth.Password(user!!, "definitely-wrong"), OkHttpClient()).ping()
             throw AssertionError("expected rejection")
         } catch (e: SubsonicApiException) {
             assertEquals(SubsonicApiException.WRONG_CREDENTIALS, e.code)

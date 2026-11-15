@@ -27,7 +27,7 @@ class PlaybackTrackerTest {
         }
 
         val scrobbles get() = outputs.filterIsInstance<Scrobble>()
-        val reports get() = outputs.filterIsInstance<Report>().map { "${it.trackId}:${it.state}" }
+        val reports get() = outputs.filterIsInstance<Report>().map { "${it.trackId}:${it.state.name.lowercase()}" }
     }
 
     @Test

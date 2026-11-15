@@ -13,7 +13,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import dev.subsonic.poweramp.SubsonicApp
-import dev.subsonic.poweramp.subsonic.SubsonicApiException
+import dev.subsonic.poweramp.server.ServerException
 import dev.subsonic.poweramp.ui.describeConnectionError
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
@@ -25,8 +25,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
     override suspend fun doWork(): Result {
         val app = applicationContext as SubsonicApp
         val manual = inputData.getBoolean(KEY_MANUAL, false)
-        val server = app.credentialStore.server.value ?: app.credentialStore.load()
-            ?: return Result.success() // nothing configured
+        val server = app.savedServer() ?: return Result.success() // nothing configured
 
         // After a rejected login, only a manual sync (or saving new credentials) tries again.
         if (app.syncStatus.status.value.authFailed && !manual) return Result.success()
@@ -43,9 +42,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         } catch (e: CancellationException) {
             app.syncStatus.markError("Sync was interrupted. Will retry.", authFailed = false)
             throw e
-        } catch (e: SubsonicApiException) {
-            val authProblem = e.code in AUTH_ERROR_CODES
-            Log.w(TAG, "Sync failed with Subsonic error ${e.code}", e)
+        } catch (e: ServerException) {
+            val authProblem = e.kind.isLoginProblem
+            Log.w(TAG, "Sync failed: server refused (${e.kind})", e)
             app.syncStatus.markError(describeConnectionError(e), authFailed = authProblem)
             if (authProblem) {
                 SyncNotifications.showAuthFailed(applicationContext)
@@ -70,14 +69,6 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         private const val KEY_MANUAL = "manual"
         private const val PERIODIC_WORK = "library-sync-periodic"
         private const val ONE_TIME_WORK = "library-sync-now"
-
-        private val AUTH_ERROR_CODES = setOf(
-            SubsonicApiException.WRONG_CREDENTIALS,
-            SubsonicApiException.TOKEN_AUTH_NOT_SUPPORTED,
-            SubsonicApiException.AUTH_MECHANISM_NOT_SUPPORTED,
-            SubsonicApiException.INVALID_API_KEY,
-            SubsonicApiException.NOT_AUTHORIZED,
-        )
 
         private fun constraints(settings: SyncSettings) = Constraints.Builder()
             .setRequiredNetworkType(if (settings.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)

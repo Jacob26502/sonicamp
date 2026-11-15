@@ -1,5 +1,7 @@
 package dev.subsonic.poweramp.subsonic
 
+import dev.subsonic.poweramp.server.ServerAuth
+import dev.subsonic.poweramp.server.UnexpectedResponseException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
@@ -24,7 +26,7 @@ import okhttp3.Request
  */
 class SubsonicClient(
     val baseUrl: HttpUrl,
-    private val auth: SubsonicAuth?,
+    private val auth: ServerAuth?,
     private val http: OkHttpClient,
     private val clientName: String = CLIENT_NAME,
 ) {
@@ -153,7 +155,7 @@ class SubsonicClient(
             .addQueryParameter("f", "json")
         if (authenticated) {
             val a = checkNotNull(auth) { "$method needs authentication but no credentials were given" }
-            a.queryParams().forEach { (k, v) -> builder.addQueryParameter(k, v) }
+            SubsonicAuth.queryParams(a).forEach { (k, v) -> builder.addQueryParameter(k, v) }
         }
         params.forEach { (k, v) -> builder.addQueryParameter(k, v) }
         return builder.build()

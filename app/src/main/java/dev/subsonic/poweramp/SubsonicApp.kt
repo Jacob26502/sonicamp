@@ -17,8 +17,9 @@ import dev.subsonic.poweramp.stream.UpgradeWorker
 import java.io.File
 import dev.subsonic.poweramp.settings.CredentialStore
 import dev.subsonic.poweramp.subsonic.RedactingLogInterceptor
-import dev.subsonic.poweramp.subsonic.ServerFeatures
-import dev.subsonic.poweramp.subsonic.SubsonicClient
+import dev.subsonic.poweramp.server.MusicServer
+import dev.subsonic.poweramp.server.MusicServers
+import dev.subsonic.poweramp.settings.SavedServer
 import dev.subsonic.poweramp.sync.LibrarySync
 import dev.subsonic.poweramp.sync.SyncNotifications
 import dev.subsonic.poweramp.sync.SyncSettingsStore
@@ -49,17 +50,16 @@ class SubsonicApp : Application() {
     val syncStatus: SyncStatusStore by lazy { SyncStatusStore(this) }
     val syncSettings: SyncSettingsStore by lazy { SyncSettingsStore(this) }
 
-    val librarySync: LibrarySync by lazy {
-        LibrarySync(libraryDatabase, { server -> SubsonicClient(server.baseUrl, server.auth, httpClient) })
-    }
+    /** Creates the [MusicServer] for a saved server; the only place that knows server types. */
+    val musicServers: MusicServers by lazy { MusicServers(httpClient) }
+
+    val librarySync: LibrarySync by lazy { LibrarySync(libraryDatabase, musicServers::create) }
 
     val coverCache: CoverCache by lazy { CoverCache(File(cacheDir, "covers"), httpClient) }
 
     val powerampRescans: PowerampRescans by lazy { PowerampRescans(this, libraryDatabase, syncStatus, syncSettings) }
 
-    val serverFeatures: ServerFeatures by lazy { ServerFeatures() }
-
-    val lyrics: LyricsRepository by lazy { LyricsRepository(File(cacheDir, "lyrics"), serverFeatures) }
+    val lyrics: LyricsRepository by lazy { LyricsRepository(File(cacheDir, "lyrics")) }
 
     val scrobbler: Scrobbler by lazy { Scrobbler(this) }
 
@@ -79,11 +79,11 @@ class SubsonicApp : Application() {
     /** For short background work started from broadcast receivers. */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Client for the saved server, or null if none is configured. */
-    fun currentClient(): SubsonicClient? {
-        val server = credentialStore.server.value ?: credentialStore.load() ?: return null
-        return SubsonicClient(server.baseUrl, server.auth, httpClient)
-    }
+    /** The saved server, or null if none is configured. */
+    fun savedServer(): SavedServer? = credentialStore.server.value ?: credentialStore.load()
+
+    /** The [MusicServer] for the saved server, or null if none is configured. */
+    fun currentServer(): MusicServer? = savedServer()?.let(musicServers::create)
 
     /** Tells Storage Access Framework clients (pickers, Poweramp's folder dialog) the roots changed. */
     fun notifyProviderRootsChanged() {

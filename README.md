@@ -89,7 +89,8 @@ can't be matched by playlist entries.
 
 ```
 app/src/main/java/dev/subsonic/poweramp/
-  subsonic/   Subsonic API client (no Android dependencies; unit-tested on the JVM)
+  server/     Server-neutral MusicServer interface, credentials, errors, and the factory that picks an implementation
+  subsonic/   Subsonic/OpenSubsonic implementation of MusicServer, on a low-level API client (JVM-tested)
   sync/       Sync logic (pure Kotlin) plus WorkManager worker, status and settings
   library/    SQLite library database (albums and artists are views over tracks)
   provider/   Poweramp track provider (DocumentsProvider), document ids, cover cache, playlist files
@@ -102,6 +103,17 @@ app/src/main/java/dev/subsonic/poweramp/
 app/src/main/java/com/maxmpz/poweramp/player/TrackProviderConsts.java
               copied from github.com/maxmpz/powerampapi (licence permits use by Poweramp plugins)
 ```
+
+### Server abstraction
+
+Everything except `subsonic/` talks to the server through `server/MusicServer`: connect, scan
+status, libraries, paged tracks, playlists, stream and cover URLs, lyrics, now-playing reports and
+scrobbles, using server-neutral records (`TrackRecord`, `PlaylistRecord`, `LibraryRecord`),
+credentials (`ServerAuth`) and errors (`ServerException` with a `Kind`). `MusicServers.create`
+picks the implementation from the saved `ServerType`; Subsonic is the only one so far. Adding another
+server type (for example Jellyfin) means a new `MusicServer` implementation, a `ServerType` value,
+a case in `MusicServers.create`, and a server-type choice on the login screen. Its library ids must be
+mapped to stable Ints, and a transcode must be constant-bitrate MP3 served as `audio/mpeg`.
 
 ## Building and testing
 

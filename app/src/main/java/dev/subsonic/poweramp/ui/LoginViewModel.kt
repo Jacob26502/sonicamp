@@ -7,10 +7,9 @@ import dev.subsonic.poweramp.SubsonicApp
 import dev.subsonic.poweramp.scrobble.ScrobbleWorker
 import dev.subsonic.poweramp.stream.UpgradeWorker
 import dev.subsonic.poweramp.settings.SavedServer
-import dev.subsonic.poweramp.subsonic.ConnectionTester
-import dev.subsonic.poweramp.subsonic.ServerInfo
+import dev.subsonic.poweramp.server.ServerAuth
+import dev.subsonic.poweramp.server.ServerDescription
 import dev.subsonic.poweramp.subsonic.ServerUrl
-import dev.subsonic.poweramp.subsonic.SubsonicAuth
 import dev.subsonic.poweramp.sync.SyncNotifications
 import dev.subsonic.poweramp.sync.SyncWorker
 import kotlinx.coroutines.CancellationException
@@ -35,7 +34,7 @@ data class LoginForm(
 
 sealed interface TestResult {
     /** [server] is exactly what was tested, so Save stores what actually worked. */
-    data class Success(val info: ServerInfo, val server: SavedServer) : TestResult
+    data class Success(val info: ServerDescription, val server: SavedServer) : TestResult
     data class Failure(val message: String) : TestResult
 }
 
@@ -61,7 +60,6 @@ data class LoginUiState(
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as SubsonicApp
-    private val tester = ConnectionTester(app.httpClient)
 
     private val _state = MutableStateFlow(LoginUiState())
     val state: StateFlow<LoginUiState> = _state.asStateFlow()
@@ -100,7 +98,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(testing = true, result = null) }
             val result = try {
                 val server = SavedServer(ServerUrl.parse(form.serverUrl), form.toAuth())
-                TestResult.Success(tester.test(server.baseUrl, server.auth), server)
+                TestResult.Success(app.musicServers.create(server).connect(), server)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -115,7 +113,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         val success = _state.value.result as? TestResult.Success ?: return
         viewModelScope.launch {
             withContext(Dispatchers.IO) { app.credentialStore.save(success.server) }
-            app.serverFeatures.clear()
+            app.musicServers.clearCachedCapabilities()
             // Plays queued while the login was rejected can go now (other servers' plays are dropped).
             ScrobbleWorker.enqueue(app)
             app.syncStatus.clearAuthFailure()
@@ -142,7 +140,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 app.streamSessions.clearCache()
                 app.scrobbler.reset()
             }
-            app.serverFeatures.clear()
+            app.musicServers.clearCachedCapabilities()
             app.syncStatus.clear()
             SyncNotifications.cancelAuthFailed(app)
             // Let Poweramp drop the tracks; we're in the foreground, so the request is honoured.
@@ -153,13 +151,13 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun LoginForm.toAuth(): SubsonicAuth = when (authMode) {
-        AuthMode.PASSWORD -> SubsonicAuth.Password(username.trim(), password)
-        AuthMode.API_KEY -> SubsonicAuth.ApiKey(apiKey.trim())
+    private fun LoginForm.toAuth(): ServerAuth = when (authMode) {
+        AuthMode.PASSWORD -> ServerAuth.Password(username.trim(), password)
+        AuthMode.API_KEY -> ServerAuth.ApiKey(apiKey.trim())
     }
 
     private fun SavedServer.toForm(): LoginForm = when (val a = auth) {
-        is SubsonicAuth.Password -> LoginForm(baseUrl.toString(), AuthMode.PASSWORD, a.username, a.password)
-        is SubsonicAuth.ApiKey -> LoginForm(baseUrl.toString(), AuthMode.API_KEY, apiKey = a.key)
+        is ServerAuth.Password -> LoginForm(baseUrl.toString(), AuthMode.PASSWORD, a.username, a.password)
+        is ServerAuth.ApiKey -> LoginForm(baseUrl.toString(), AuthMode.API_KEY, apiKey = a.key)
     }
 }

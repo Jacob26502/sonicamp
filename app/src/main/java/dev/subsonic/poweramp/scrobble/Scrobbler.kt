@@ -6,9 +6,8 @@ import android.util.Log
 import dev.subsonic.poweramp.SubsonicApp
 import dev.subsonic.poweramp.poweramp.PowerampApi
 import dev.subsonic.poweramp.provider.SubsonicDocumentsProvider
+import dev.subsonic.poweramp.server.MusicServer
 import dev.subsonic.poweramp.settings.SavedServer
-import dev.subsonic.poweramp.subsonic.Extensions
-import dev.subsonic.poweramp.subsonic.SubsonicClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,13 +16,12 @@ import kotlinx.serialization.json.Json
 
 /**
  * Reports what Poweramp plays from our library back to the server:
- * - "now playing" in real time (OpenSubsonic reportPlayback, or classic scrobble with submission=false),
- *   best effort and dropped when offline;
+ * - "now playing" in real time ([MusicServer.reportPlayback]), best effort and dropped when offline;
  * - finished plays as scrobbles with the time they started, queued in [ScrobbleQueue] and sent by
  *   [ScrobbleWorker], so plays made offline are sent later.
  *
- * Play counting is always ours ([PlaybackTracker]), and reportPlayback is sent with ignoreScrobble,
- * so a play is never counted twice.
+ * Play counting is always ours ([PlaybackTracker]); [MusicServer.reportPlayback] must never count a
+ * play itself, so a play is never counted twice.
  */
 class Scrobbler(private val app: SubsonicApp) {
 
@@ -88,17 +86,13 @@ class Scrobbler(private val app: SubsonicApp) {
         }
         if (scrobbles.isNotEmpty()) ScrobbleWorker.enqueue(app)
 
-        val client = SubsonicClient(server.baseUrl, server.auth, app.httpClient)
-        outputs.filterIsInstance<PlaybackTracker.Output.Report>().forEach { report(server, client, it) }
+        val music = app.musicServers.create(server)
+        outputs.filterIsInstance<PlaybackTracker.Output.Report>().forEach { report(music, it) }
     }
 
-    private suspend fun report(server: SavedServer, client: SubsonicClient, r: PlaybackTracker.Output.Report) {
+    private suspend fun report(music: MusicServer, r: PlaybackTracker.Output.Report) {
         try {
-            if (app.serverFeatures.supports(server.baseUrl.toString(), client, Extensions.PLAYBACK_REPORT)) {
-                client.reportPlayback(r.trackId, r.state, r.positionMs)
-            } else if (r.state == "starting" || r.state == "playing") {
-                client.scrobble(r.trackId, playedAtMs = null, submission = false)
-            }
+            music.reportPlayback(r.trackId, r.state, r.positionMs)
             Log.d(TAG, "Reported ${r.state} for ${r.trackId}")
         } catch (e: CancellationException) {
             throw e
@@ -114,7 +108,7 @@ class Scrobbler(private val app: SubsonicApp) {
         prefs.edit().remove(KEY_STATE).apply()
     }
 
-    private fun currentServer(): SavedServer? = app.credentialStore.server.value ?: app.credentialStore.load()
+    private fun currentServer(): SavedServer? = app.savedServer()
 
 
     private fun loadState(): PlaybackTracker.State = try {

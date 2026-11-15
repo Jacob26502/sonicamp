@@ -1,9 +1,10 @@
 package dev.subsonic.poweramp.sync
 
+import dev.subsonic.poweramp.server.ServerAuth
 import dev.subsonic.poweramp.settings.SavedServer
 import dev.subsonic.poweramp.subsonic.ServerUrl
-import dev.subsonic.poweramp.subsonic.SubsonicAuth
-import dev.subsonic.poweramp.subsonic.SubsonicClient
+import dev.subsonic.poweramp.subsonic.ServerFeatures
+import dev.subsonic.poweramp.subsonic.SubsonicServer
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
@@ -69,9 +70,9 @@ class LibrarySyncTest {
     @Before
     fun setUp() {
         mock = MockWebServer().apply { dispatcher = fake; start() }
-        server = SavedServer(ServerUrl.parse(mock.url("/").toString()), SubsonicAuth.Password("admin", "pw"))
+        server = SavedServer(ServerUrl.parse(mock.url("/").toString()), ServerAuth.Password("admin", "pw"))
         val http = OkHttpClient()
-        sync = LibrarySync(store, { SubsonicClient(it.baseUrl, it.auth, http) }, clock = { now }, pageSize = 2)
+        sync = LibrarySync(store, { SubsonicServer(it.baseUrl, it.auth, http, ServerFeatures()) }, clock = { now }, pageSize = 2)
     }
 
     @After
@@ -183,7 +184,7 @@ class LibrarySyncTest {
         fake.songs += FakeServer.FakeSong("s1", "One")
         sync.sync(server)
 
-        val other = server.copy(auth = SubsonicAuth.Password("someone-else", "pw"))
+        val other = server.copy(auth = ServerAuth.Password("someone-else", "pw"))
         val result = sync.sync(other)
 
         assertTrue(result.wiped)

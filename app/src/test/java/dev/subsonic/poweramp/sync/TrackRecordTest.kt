@@ -2,6 +2,7 @@ package dev.subsonic.poweramp.sync
 
 import dev.subsonic.poweramp.subsonic.ArtistRef
 import dev.subsonic.poweramp.subsonic.Song
+import dev.subsonic.poweramp.subsonic.toTrackRecord
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue

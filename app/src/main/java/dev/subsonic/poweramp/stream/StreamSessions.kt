@@ -3,6 +3,7 @@ package dev.subsonic.poweramp.stream
 import android.net.ConnectivityManager
 import android.content.Context
 import android.util.Log
+import dev.subsonic.poweramp.server.StreamQuality
 import dev.subsonic.poweramp.settings.SavedServer
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -40,7 +41,7 @@ class StreamSessions(
      * fully cached original always wins (best quality, no network), and transcoding is skipped when
      * the original's bitrate is no higher than the target.
      *
-     * @param streamUrl builds the stream URL for (maxBitRate kbps, format), both null for the original.
+     * @param streamUrl the server's stream URL for a quality.
      */
     fun chooseSource(
         server: SavedServer,
@@ -48,15 +49,15 @@ class StreamSessions(
         originalSize: Long,
         durationSec: Int?,
         originalKbps: Int?,
-        streamUrl: (Int?, String?) -> HttpUrl,
+        streamUrl: (StreamQuality) -> HttpUrl,
     ): Source {
-        val original = Source(streamUrl(null, "raw"), originalSize, RAW, transcoded = false)
+        val original = Source(streamUrl(StreamQuality.Original), originalSize, RAW, transcoded = false)
         val kbps = settings().quality(isMetered())
         if (kbps == CacheSettings.ORIGINAL || durationSec == null || durationSec <= 0) return original
         if (originalKbps != null && originalKbps <= kbps) return original
         if (cache.isComplete(cache.fileFor(server.identity, trackId, originalSize, RAW))) return original
         return Source(
-            url = streamUrl(kbps, "mp3"),
+            url = streamUrl(StreamQuality.Mp3(kbps)),
             size = StreamSession.mp3Size(durationSec, kbps),
             variant = "mp3-$kbps",
             transcoded = true,
@@ -116,8 +117,8 @@ class StreamSessions(
     }
 
     /** The source for downloading a track's original file (used by [UpgradeWorker]). */
-    fun originalSource(trackId: String, size: Long, streamUrl: (Int?, String?) -> HttpUrl) =
-        Source(streamUrl(null, "raw"), size, RAW, transcoded = false)
+    fun originalSource(size: Long, streamUrl: (StreamQuality) -> HttpUrl) =
+        Source(streamUrl(StreamQuality.Original), size, RAW, transcoded = false)
 
     @Synchronized
     fun inUse(): Set<File> = sessions.values.map { it.file }.toSet()

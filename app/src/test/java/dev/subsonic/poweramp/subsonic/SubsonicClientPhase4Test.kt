@@ -1,5 +1,6 @@
 package dev.subsonic.poweramp.subsonic
 
+import dev.subsonic.poweramp.server.ServerAuth
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -28,7 +29,7 @@ class SubsonicClientPhase4Test {
     }
 
     private fun client() =
-        SubsonicClient(ServerUrl.parse(server.url("/").toString()), SubsonicAuth.Password("admin", "pw"), OkHttpClient())
+        SubsonicClient(ServerUrl.parse(server.url("/").toString()), ServerAuth.Password("admin", "pw"), OkHttpClient())
 
     private fun ok(inner: String = "") = MockResponse().setBody("""{"subsonic-response":{"status":"ok","version":"1.16.1"$inner}}""")
 

@@ -1,9 +1,7 @@
 package dev.subsonic.poweramp.sync
 
+import dev.subsonic.poweramp.server.MusicServer
 import dev.subsonic.poweramp.settings.SavedServer
-import dev.subsonic.poweramp.subsonic.MusicFolder
-import dev.subsonic.poweramp.subsonic.SubsonicApiException
-import dev.subsonic.poweramp.subsonic.SubsonicClient
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
@@ -33,13 +31,13 @@ data class SyncResult(
 }
 
 /**
- * Full library sync: pages through every song, diffs against [store], and applies the result in
- * one transaction. A full fetch is cheap (about one request per 500 songs) and is the only reliable
- * option: Navidrome's lastScan/lastModified change on every scan even when nothing changed.
+ * Full library sync: pages through every track, diffs against [store] by content hash, and applies
+ * the result in one transaction. A full fetch is cheap (about one request per 500 tracks) and works on
+ * any server; Navidrome, for one, has no reliable per-song "modified" time to sync incrementally.
  */
 class LibrarySync(
     private val store: LibraryStore,
-    private val clientFor: (SavedServer) -> SubsonicClient,
+    private val serverFor: (SavedServer) -> MusicServer,
     private val clock: () -> Long = System::currentTimeMillis,
     private val pageSize: Int = 500,
 ) {
@@ -47,25 +45,25 @@ class LibrarySync(
 
     /** Concurrent calls (scheduled + "sync now") run one after the other, never in parallel. */
     suspend fun sync(server: SavedServer): SyncResult = mutex.withLock {
-        val client = clientFor(server)
-        checkNotScanning(client)
+        val music = serverFor(server)
+        if (music.isScanning()) throw ServerBusyException()
 
         val identity = server.identity
         val wiped = store.identity().let { it != null && it != identity }
         if (wiped) store.wipe()
 
-        val libraries = fetchLibraries(client)
-        val tracks = fetchAllTracks(client, libraries)
+        val libraries = music.libraries()
+        val tracks = fetchAllTracks(music, libraries)
         val existing = store.trackHashes()
         if (tracks.isEmpty() && existing.isNotEmpty()) throw SuspiciousEmptyLibraryException()
 
         val trackDiff = TrackDiff.between(existing, tracks)
-        val playlistDiff = fetchPlaylistChanges(client)
+        val playlistDiff = fetchPlaylistChanges(music)
 
         store.apply(
             LibraryUpdate(
                 identity = identity,
-                libraries = libraries.map { it.toLibraryRecord() },
+                libraries = libraries,
                 tracks = trackDiff,
                 playlists = playlistDiff,
                 syncedAt = clock(),
@@ -82,30 +80,15 @@ class LibrarySync(
         )
     }
 
-    private suspend fun checkNotScanning(client: SubsonicClient) {
-        val scanning = try {
-            client.scanStatus().scanning
-        } catch (e: SubsonicApiException) {
-            false // getScanStatus is optional; servers without it just get synced.
-        }
-        if (scanning) throw ServerBusyException()
-    }
-
-    private suspend fun fetchLibraries(client: SubsonicClient): List<MusicFolder> = try {
-        client.musicFolders()
-    } catch (e: SubsonicApiException) {
-        emptyList()
-    }
-
-    private suspend fun fetchAllTracks(client: SubsonicClient, libraries: List<MusicFolder>): Collection<TrackRecord> {
+    private suspend fun fetchAllTracks(music: MusicServer, libraries: List<LibraryRecord>): Collection<TrackRecord> {
         // Keyed by id: pages can overlap if the library changes during the sync.
         val byId = LinkedHashMap<String, TrackRecord>()
         val sources: List<Int?> = libraries.map { it.id }.ifEmpty { listOf(null) }
         for (libraryId in sources) {
             var offset = 0
             while (true) {
-                val page = client.allSongsPage(offset, pageSize, libraryId)
-                page.forEach { byId[it.id] = it.toTrackRecord(libraryId ?: DEFAULT_LIBRARY_ID) }
+                val page = music.tracks(libraryId, offset, pageSize)
+                page.forEach { byId[it.id] = it }
                 if (page.size < pageSize) break
                 offset += pageSize
             }
@@ -113,12 +96,12 @@ class LibrarySync(
         return byId.values
     }
 
-    private suspend fun fetchPlaylistChanges(client: SubsonicClient): PlaylistDiff {
+    private suspend fun fetchPlaylistChanges(music: MusicServer): PlaylistDiff {
         val known = store.playlistVersions()
-        val current = client.playlists()
+        val current = music.playlists()
         val upserts = current
-            .filter { it.id !in known || it.changed == null || known[it.id] != it.changed }
-            .map { client.playlist(it.id).toPlaylistRecord() }
+            .filter { it.id !in known || it.version == null || known[it.id] != it.version }
+            .map { music.playlist(it.id) }
         return PlaylistDiff(upserts, known.keys - current.map { it.id }.toSet())
     }
 }

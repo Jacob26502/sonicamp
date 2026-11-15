@@ -11,8 +11,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dev.subsonic.poweramp.SubsonicApp
-import dev.subsonic.poweramp.subsonic.SubsonicApiException
-import dev.subsonic.poweramp.subsonic.SubsonicClient
+import dev.subsonic.poweramp.server.ServerException
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -22,10 +21,10 @@ class ScrobbleWorker(context: Context, params: WorkerParameters) : CoroutineWork
     override suspend fun doWork(): Result {
         val app = applicationContext as SubsonicApp
         val queue = app.scrobbler.queue
-        val server = app.credentialStore.server.value ?: app.credentialStore.load()
+        val server = app.savedServer()
         queue.removeOtherServers(server?.identity)
         if (server == null) return Result.success()
-        val client = SubsonicClient(server.baseUrl, server.auth, app.httpClient)
+        val music = app.musicServers.create(server)
 
         var sent = 0
         // Loop until empty: plays may be queued while this runs (KEEP won't start a second worker).
@@ -34,23 +33,24 @@ class ScrobbleWorker(context: Context, params: WorkerParameters) : CoroutineWork
             if (batch.isEmpty()) break
             for (item in batch) {
                 try {
-                    client.scrobble(item.songId, item.playedAt, submission = true)
+                    music.scrobble(item.songId, item.playedAt)
                     queue.remove(item.id)
                     sent++
-                } catch (e: IOException) {
-                    Log.i(TAG, "Offline; ${queue.count()} plays wait (sent $sent)")
-                    return Result.retry()
-                } catch (e: SubsonicApiException) {
+                } catch (e: ServerException) {
+                    // Must come before IOException, which ServerException extends.
                     when {
-                        e.code == SubsonicApiException.NOT_FOUND -> queue.remove(item.id) // song deleted from the server
-                        e.code in RETRY_LATER_CODES -> {
-                            // Login problem: keep the plays; sync shows the error. Retried on the next play.
-                            Log.w(TAG, "Server refused scrobbles (code ${e.code}); keeping ${queue.count()} plays")
+                        e.kind == ServerException.Kind.NOT_FOUND -> queue.remove(item.id) // song deleted from the server
+                        e.kind.isLoginProblem -> {
+                            // Keep the plays; sync shows the error. Retried on the next play.
+                            Log.w(TAG, "Server refused scrobbles (${e.kind}); keeping ${queue.count()} plays")
                             return Result.failure()
                         }
                         item.attempts + 1 >= MAX_ATTEMPTS -> queue.remove(item.id)
                         else -> queue.markAttempt(item.id)
                     }
+                } catch (e: IOException) {
+                    Log.i(TAG, "Offline; ${queue.count()} plays wait (sent $sent)")
+                    return Result.retry()
                 }
             }
         }
@@ -62,14 +62,6 @@ class ScrobbleWorker(context: Context, params: WorkerParameters) : CoroutineWork
         private const val TAG = "ScrobbleWorker"
         private const val WORK = "scrobble-flush"
         private const val MAX_ATTEMPTS = 5
-
-        private val RETRY_LATER_CODES = setOf(
-            SubsonicApiException.WRONG_CREDENTIALS,
-            SubsonicApiException.TOKEN_AUTH_NOT_SUPPORTED,
-            SubsonicApiException.AUTH_MECHANISM_NOT_SUPPORTED,
-            SubsonicApiException.INVALID_API_KEY,
-            SubsonicApiException.NOT_AUTHORIZED,
-        )
 
         fun enqueue(context: Context) {
             val request = OneTimeWorkRequestBuilder<ScrobbleWorker>()

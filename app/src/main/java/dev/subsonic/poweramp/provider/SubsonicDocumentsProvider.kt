@@ -45,7 +45,6 @@ import dev.subsonic.poweramp.library.track
 import dev.subsonic.poweramp.library.tracksOfAlbum
 import dev.subsonic.poweramp.library.tracksWithoutAlbum
 import dev.subsonic.poweramp.settings.SavedServer
-import dev.subsonic.poweramp.subsonic.SubsonicClient
 import java.io.FileNotFoundException
 
 /**
@@ -188,9 +187,9 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         val size = track.sizeBytes?.takeIf { it > 0 } ?: notFound("track:$trackId (unknown size)")
         val server = currentServer() ?: notFound("track:$trackId (no server)")
         val sessions = app.streamSessions
-        val client = client(server)
-        val source = sessions.chooseSource(server, trackId, size, track.durationSec, track.bitRate) { kbps, format ->
-            client.streamUrl(trackId, maxBitRateKbps = kbps, format = format)
+        val music = app.musicServers.create(server)
+        val source = sessions.chooseSource(server, trackId, size, track.durationSec, track.bitRate) { quality ->
+            music.streamUrl(trackId, quality)
         }
         val session = sessions.acquire(server, trackId, source)
         val thread = HandlerThread("fd-$trackId").apply { start() }
@@ -223,7 +222,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
             } ?: notFound(documentId)
             val server = currentServer() ?: notFound(documentId)
             val size = sizeHint?.let { maxOf(it.x, it.y) } ?: 0
-            val file = app.coverCache.get(client(server), coverArt, size, signal)
+            val file = app.coverCache.get(app.musicServers.create(server), coverArt, size, signal)
             Log.d(TAG, "Cover for $documentId (${sizeHint?.x}x${sizeHint?.y}) -> ${file.length()} bytes")
             return AssetFileDescriptor(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY), 0, file.length())
         } catch (e: FileNotFoundException) {
@@ -343,7 +342,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
     private fun lyricsFor(t: TrackRow): TrackLyrics? {
         val server = currentServer() ?: return null
         val result = runBlocking(Dispatchers.IO) {
-            withTimeoutOrNull(LYRICS_TIMEOUT_MS) { app.lyrics.get(client(server), t.id, t.artist, t.title) }
+            withTimeoutOrNull(LYRICS_TIMEOUT_MS) { app.lyrics.get(app.musicServers.create(server), t.id, t.artist, t.title) }
         }
         Log.i(TAG, "Lyrics for ${t.id}: ${result?.let { if (it.isEmpty) "none" else if (it.synced != null) "synced" else "plain" } ?: "unavailable"}")
         return result
@@ -411,9 +410,7 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         is DocId.Playlist -> DocId.Playlists
     }
 
-    private fun currentServer(): SavedServer? = app.credentialStore.server.value ?: app.credentialStore.load()
-
-    private fun client(server: SavedServer) = SubsonicClient(server.baseUrl, server.auth, app.httpClient)
+    private fun currentServer(): SavedServer? = app.savedServer()
 
     private fun notFound(id: String): Nothing = throw FileNotFoundException("No such document: $id")
 

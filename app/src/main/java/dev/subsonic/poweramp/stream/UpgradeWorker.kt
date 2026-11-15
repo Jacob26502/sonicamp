@@ -11,7 +11,6 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dev.subsonic.poweramp.SubsonicApp
 import dev.subsonic.poweramp.library.track
-import dev.subsonic.poweramp.subsonic.SubsonicClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
@@ -29,7 +28,7 @@ class UpgradeWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val server = app.credentialStore.server.value ?: app.credentialStore.load() ?: return@withContext Result.success()
         val cache = app.audioCache
         val sessions = app.streamSessions
-        val client = SubsonicClient(server.baseUrl, server.auth, app.httpClient)
+        val music = app.musicServers.create(server)
 
         val trackIds = cache.entries()
             .filter { it.serverIdentity == server.identity && it.variant != StreamSessions.RAW }
@@ -51,9 +50,7 @@ class UpgradeWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     Log.i(TAG, "Cache full; stopping after $upgraded upgrades")
                     break
                 }
-                val source = sessions.originalSource(trackId, size) { kbps, format ->
-                    client.streamUrl(trackId, maxBitRateKbps = kbps, format = format)
-                }
+                val source = sessions.originalSource(size) { quality -> music.streamUrl(trackId, quality) }
                 val session = sessions.acquire(server, trackId, source)
                 val done = try {
                     session.awaitComplete(TRACK_TIMEOUT_MS)

@@ -1,5 +1,6 @@
 package dev.subsonic.poweramp.scrobble
 
+import dev.subsonic.poweramp.server.PlaybackState
 import kotlinx.serialization.Serializable
 
 /**
@@ -30,8 +31,7 @@ object PlaybackTracker {
     )
 
     sealed interface Output {
-        /** OpenSubsonic reportPlayback states: starting, playing, paused, stopped. */
-        data class Report(val trackId: String, val state: String, val positionMs: Long) : Output
+        data class Report(val trackId: String, val state: PlaybackState, val positionMs: Long) : Output
         data class Scrobble(val trackId: String, val playedAt: Long) : Output
     }
 
@@ -56,7 +56,7 @@ object PlaybackTracker {
             playing = s.playing,
             startReported = s.playing && trackId != null,
         )
-        if (trackId != null && s.playing) outputs += Output.Report(trackId, "starting", 0)
+        if (trackId != null && s.playing) outputs += Output.Report(trackId, PlaybackState.STARTING, 0)
         return Result(next, outputs)
     }
 
@@ -72,7 +72,7 @@ object PlaybackTracker {
             playing && !s.playing -> {
                 val resumed = s.copy(playing = true, playingSince = ts, startReported = s.startReported || id != null)
                 if (id != null) {
-                    val state = if (s.startReported) "playing" else "starting"
+                    val state = if (s.startReported) PlaybackState.PLAYING else PlaybackState.STARTING
                     outputs += Output.Report(id, state, positionSec?.times(1000L) ?: s.playedMs)
                 }
                 resumed
@@ -80,7 +80,7 @@ object PlaybackTracker {
             !playing && s.playing -> {
                 val paused = finish(s, ts, outputs, reportStop = stopped).copy(playing = false)
                 if (id != null && !stopped) {
-                    outputs += Output.Report(id, "paused", positionSec?.times(1000L) ?: paused.playedMs)
+                    outputs += Output.Report(id, PlaybackState.PAUSED, positionSec?.times(1000L) ?: paused.playedMs)
                 }
                 paused
             }
@@ -102,7 +102,7 @@ object PlaybackTracker {
                 outputs += Output.Scrobble(id, s.startedAt)
                 scrobbled = true
             }
-            if (reportStop && s.startReported) outputs += Output.Report(id, "stopped", played)
+            if (reportStop && s.startReported) outputs += Output.Report(id, PlaybackState.STOPPED, played)
         }
         return s.copy(
             playedMs = played,

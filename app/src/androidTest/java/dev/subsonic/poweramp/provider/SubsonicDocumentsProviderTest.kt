@@ -10,9 +10,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.maxmpz.poweramp.player.TrackProviderConsts
 import dev.subsonic.poweramp.SubsonicApp
+import dev.subsonic.poweramp.server.ServerAuth
 import dev.subsonic.poweramp.settings.SavedServer
 import dev.subsonic.poweramp.subsonic.ServerUrl
-import dev.subsonic.poweramp.subsonic.SubsonicAuth
 import dev.subsonic.poweramp.sync.LibraryRecord
 import dev.subsonic.poweramp.sync.LibraryUpdate
 import dev.subsonic.poweramp.sync.PlaylistDiff
@@ -50,7 +50,7 @@ class SubsonicDocumentsProviderTest {
     @Before
     fun setUp() {
         app.libraryDatabase.wipe()
-        app.credentialStore.save(SavedServer(ServerUrl.parse("http://music.test:4533"), SubsonicAuth.Password("user", "pw")))
+        app.credentialStore.save(SavedServer(ServerUrl.parse("http://music.test:4533"), ServerAuth.Password("user", "pw")))
         app.libraryDatabase.apply(
             LibraryUpdate(
                 identity = "test",

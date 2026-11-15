@@ -1,11 +1,8 @@
 package dev.subsonic.poweramp.sync
 
-import dev.subsonic.poweramp.subsonic.MusicFolder
-import dev.subsonic.poweramp.subsonic.Playlist
-import dev.subsonic.poweramp.subsonic.Song
 import java.security.MessageDigest
 
-/** A track as stored locally. Everything Poweramp will need, flattened from [Song]. */
+/** A track as stored locally: everything Poweramp needs, in a server-neutral form. */
 data class TrackRecord(
     val id: String,
     val libraryId: Int,
@@ -35,8 +32,8 @@ data class TrackRecord(
     val channels: Int? = null,
 ) {
     /**
-     * Fingerprint of every stored field. Navidrome has no per-song "modified" timestamp, so a
-     * track counts as changed exactly when this changes. Field order is part of the format.
+     * Fingerprint of every stored field. Servers like Navidrome have no per-song "modified" timestamp,
+     * so a track counts as changed exactly when this changes. Field order is part of the format.
      */
     val contentHash: String by lazy {
         val canonical = listOf(
@@ -54,41 +51,8 @@ data class TrackRecord(
     }
 }
 
-/** Used when the server doesn't support getMusicFolders. */
+/** Library id used when the server reports no separate libraries. */
 const val DEFAULT_LIBRARY_ID = 0
-
-fun Song.toTrackRecord(libraryId: Int): TrackRecord {
-    val albumArtistNames = albumArtists.map { it.name }.filter { it.isNotBlank() }
-    return TrackRecord(
-        id = id,
-        libraryId = libraryId,
-        title = title,
-        albumId = albumId,
-        album = album,
-        artist = displayArtist ?: artist,
-        // Classic Subsonic songs have no album-artist fields: fall back to the track artist.
-        albumArtistId = albumArtists.firstOrNull()?.id ?: artistId,
-        albumArtist = displayAlbumArtist
-            ?: albumArtistNames.takeIf { it.isNotEmpty() }?.joinToString(" • ")
-            ?: artist,
-        trackNo = track,
-        discNo = discNumber,
-        year = year,
-        genre = genre,
-        durationSec = duration,
-        sizeBytes = size,
-        suffix = suffix,
-        contentType = contentType,
-        bitRate = bitRate,
-        coverArt = coverArt,
-        path = path,
-        created = created,
-        composer = displayComposer?.takeIf { it.isNotBlank() },
-        sampleRate = samplingRate?.takeIf { it > 0 },
-        bitDepth = bitDepth?.takeIf { it > 0 },
-        channels = channelCount?.takeIf { it > 0 },
-    )
-}
 
 data class PlaylistRecord(
     val id: String,
@@ -102,18 +66,4 @@ data class PlaylistRecord(
     val trackIds: List<String>,
 )
 
-fun Playlist.toPlaylistRecord() = PlaylistRecord(
-    id = id,
-    name = name,
-    comment = comment,
-    owner = owner,
-    songCount = songCount,
-    durationSec = duration,
-    changed = changed,
-    coverArt = coverArt,
-    trackIds = entry.map { it.id },
-)
-
 data class LibraryRecord(val id: Int, val name: String)
-
-fun MusicFolder.toLibraryRecord() = LibraryRecord(id, name ?: "Library $id")

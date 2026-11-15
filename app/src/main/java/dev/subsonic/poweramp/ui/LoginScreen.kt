@@ -38,7 +38,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import dev.subsonic.poweramp.subsonic.ServerInfo
+import dev.subsonic.poweramp.server.ServerDescription
 
 @Composable
 fun LoginRoute(
@@ -202,23 +202,19 @@ fun LoginScreen(
 }
 
 @Composable
-private fun SuccessCard(info: ServerInfo, usingApiKey: Boolean) {
+private fun SuccessCard(info: ServerDescription, usingApiKey: Boolean) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Connected to ${info.displayName}", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Subsonic API ${info.apiVersion ?: "?"}" + if (info.openSubsonic) " · OpenSubsonic" else "",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (info.extensions.isNotEmpty()) {
+            Text("Connected to ${info.name}", style = MaterialTheme.typography.titleMedium)
+            info.details.forEachIndexed { i, line ->
                 Text(
-                    "Extensions: " + info.extensions.joinToString { it.name },
-                    style = MaterialTheme.typography.bodySmall,
+                    line,
+                    style = if (i == 0) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodySmall,
                 )
             }
-            if (!usingApiKey) {
+            if (!usingApiKey && info.supportsApiKeys != null) {
                 Text(
-                    if (info.supportsApiKey) "This server also supports API keys, which avoid storing your password."
+                    if (info.supportsApiKeys) "This server also supports API keys, which avoid storing your password."
                     else "This server doesn't support API keys, so your password is stored (encrypted) on this device.",
                     style = MaterialTheme.typography.bodySmall,
                 )
