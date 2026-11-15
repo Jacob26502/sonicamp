@@ -99,7 +99,6 @@ app/src/main/java/dev/subsonic/poweramp/
   ui/         Compose screens
 app/src/main/java/com/maxmpz/poweramp/player/TrackProviderConsts.java
               copied from github.com/maxmpz/powerampapi (licence permits use by Poweramp plugins)
-Navidrome/    Docker compose for a local test server, plus a rescan script
 ```
 
 ## Building and testing
@@ -124,27 +123,19 @@ otherwise:
 SUBSONIC_TEST_URL=http://localhost:4533 SUBSONIC_TEST_USER=<user> SUBSONIC_TEST_PASSWORD=<password> ./gradlew testDebugUnitTest
 ```
 
-## Local Navidrome test server
+## Test server
 
-```bash
-docker compose -f Navidrome/docker-compose.yml up -d
-```
+Development used a local Navidrome in Docker (`navidrome/navidrome`, port 4533). From the Android
+emulator it's at `http://10.0.2.2:4533`; a USB-connected phone reaches it at `http://127.0.0.1:4533`
+after `adb reverse tcp:4533 tcp:4533`.
 
-Open http://localhost:4533 to create the admin account, and put music in `Navidrome/music/`
-(`Artist/Album/01 - Title.flac`; tags matter more than folder names). From the Android emulator the
-server is at `http://10.0.2.2:4533`.
+Notes for Docker Desktop on Windows:
 
-Docker on Windows does not pass file-change events into the container, so Navidrome won't notice new
-music on its own. Rescan after adding files:
-
-```powershell
-.\Navidrome\rescan.ps1        # quick scan
-.\Navidrome\rescan.ps1 -Full  # re-read every file
-```
-
-The compose file also turns off Navidrome's transcoding cache (`ND_TRANSCODINGCACHESIZE: "0"`): on
-Docker Desktop for Windows, reading that cache back through the mounted `data/` folder fails with "no
-data available", which truncates MP3/AAC transcodes to a few KB.
+- Containers get no file-change events, so Navidrome won't notice new music on its own: rescan with
+  `docker compose exec navidrome /app/navidrome scan`, or set `ND_SCANNER_SCHEDULE`.
+- Set `ND_TRANSCODINGCACHESIZE: "0"`. Reading Navidrome's transcoding cache back through a
+  Windows-mounted data folder fails with "no data available", which truncates MP3/AAC transcodes to a
+  few KB.
 
 ## Debugging
 
