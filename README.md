@@ -1,5 +1,7 @@
 # Sonicamp
 
+A mostly Vibecoded app that allows you to connect a subsonic server to Poweramp (the best android audio player). Uses proxy files to provide data to poweramp, caches data and songs over time. Seems to work pretty well. Everything else in the readme is AI generated... Tx.
+
 An Android app that makes a Subsonic / OpenSubsonic server (developed against **Navidrome**) appear in
 [Poweramp](https://powerampapp.com/) as a library, using Poweramp's track-provider API.
 
