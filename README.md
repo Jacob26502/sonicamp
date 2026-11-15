@@ -157,3 +157,13 @@ took and how much is cached. Logs never contain stream URLs or tokens, only trac
 rather than `gradlew installDebug`, which installs into every user profile on the device (including a
 work profile). Likewise, set `ANDROID_SERIAL` before `connectedDebugAndroidTest`, which otherwise runs
 on every connected device.
+
+## Licence
+
+Sonicamp is free software, licensed under the [GNU General Public License v3.0](LICENSE): you can
+use, study, share and modify it, and versions you distribute must stay under the same licence with
+their source available.
+
+`app/src/main/java/com/maxmpz/poweramp/player/TrackProviderConsts.java` is © Maksim Petrov and keeps
+its own licence (in the file header), which permits redistribution by software that communicates
+with Poweramp.
