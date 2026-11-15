@@ -286,7 +286,9 @@ class SubsonicDocumentsProvider : DocumentsProvider() {
         c.newRow().apply {
             add(Document.COLUMN_DOCUMENT_ID, DocId.Playlist(p.id).encoded)
             add(Document.COLUMN_MIME_TYPE, PLAYLIST_MIME)
-            add(Document.COLUMN_DISPLAY_NAME, cleanName(p.name) + DocId.PLAYLIST_EXT)
+            // Poweramp names the playlist after the display name as-is, so no extension here; the
+            // mime type and the document id (which ends in .m3u8) mark it as a playlist.
+            add(Document.COLUMN_DISPLAY_NAME, cleanName(p.name))
             add(Document.COLUMN_LAST_MODIFIED, p.lastModified)
             add(Document.COLUMN_FLAGS, 0)
         }

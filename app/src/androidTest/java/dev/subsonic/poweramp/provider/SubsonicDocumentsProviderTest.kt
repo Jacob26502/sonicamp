@@ -208,7 +208,7 @@ class SubsonicDocumentsProviderTest {
         val playlists = children("playlists")
         val pl = playlists.single()
         assertEquals("playlist:pl1.m3u8", pl[Document.COLUMN_DOCUMENT_ID])
-        assertEquals("Road∕Trip.m3u8", pl[Document.COLUMN_DISPLAY_NAME])
+        assertEquals("Road∕Trip", pl[Document.COLUMN_DISPLAY_NAME])
         assertEquals("audio/x-mpegurl", pl[Document.COLUMN_MIME_TYPE])
 
         val uri = DocumentsContract.buildDocumentUri(authority, "playlist:pl1.m3u8")
