@@ -11,3 +11,14 @@ captures/
 # Local Navidrome test server: database and music stay out of version control
 Navidrome/data/
 Navidrome/music/
+Navidrome/.env
+Navidrome/downloads/
+Navidrome/slskd/
+Navidrome/lidarr/
+Navidrome/soularr/*
+!Navidrome/soularr/config.ini.example
+Navidrome/beets/*
+!Navidrome/beets/config.yaml
+
+# Copy of the server arr stack (contains secrets) - never commit
+arrstack/
