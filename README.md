@@ -1,4 +1,4 @@
-# Subsonic for Poweramp
+# Sonicamp
 
 An Android app that makes a Subsonic / OpenSubsonic server (developed against **Navidrome**) appear in
 [Poweramp](https://powerampapp.com/) as a library, using Poweramp's track-provider API.
@@ -33,7 +33,7 @@ can't be matched by playlist entries.
 - **Poweramp provider:** a Storage Access Framework documents provider showing
   Library → Album artist → Album → Tracks, answered from the local database. Tracks carry full tags;
   multi-disc albums are numbered disc × 1000 + track so discs sort in order. Covers are fetched once
-  per album and cached. To add it: Poweramp → Settings → Library → Music Folders → + → Subsonic.
+  per album and cached. To add it: Poweramp → Settings → Library → Music Folders → + → Sonicamp.
 - **Keeping Poweramp current:** after a sync that changed something the app asks Poweramp to rescan.
   If Poweramp ignores that (it only accepts scan requests while it or the app is in the foreground),
   the request is retried when Poweramp starts playing. Rescan in Poweramp also triggers a server sync

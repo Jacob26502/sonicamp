@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon (Android 13+) version of the logo: one colour, tinted by the system. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M45.5,29.3 A28,28 0 0,0 45.5,78.7"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="7.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M36.4,25.6 A36,36 0 0,0 36.4,82.4"
+        android:strokeColor="#FFFFFF"
+        android:strokeAlpha="0.6"
+        android:strokeWidth="7.5"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45.6,43.6 Q45.6,35.8 52.4,39.7 L70,50.1 Q76.8,54 70,57.9 L52.4,68.3 Q45.6,72.2 45.6,64.4 Z" />
+</vector>

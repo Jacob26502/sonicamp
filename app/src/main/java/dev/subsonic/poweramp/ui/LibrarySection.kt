@@ -139,7 +139,7 @@ fun LibrarySection(
     Text("Poweramp", style = MaterialTheme.typography.headlineSmall)
     Text(
         "To add this library in Poweramp: Settings → Library → Music Folders → + → open the menu → " +
-            "Subsonic for Poweramp → Subsonic → Use this folder.",
+            "Sonicamp → Sonicamp → Use this folder.",
         style = MaterialTheme.typography.bodyMedium,
     )
     Text(

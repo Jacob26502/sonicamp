@@ -211,7 +211,7 @@ class SubsonicClient(
     companion object {
         /** Highest classic Subsonic API version; also what Navidrome reports. */
         const val API_VERSION = "1.16.1"
-        const val CLIENT_NAME = "SubsonicPoweramp"
+        const val CLIENT_NAME = "Sonicamp"
 
         /**
          * isLenient stays on deliberately: some servers send IDs as JSON numbers, and strict mode
